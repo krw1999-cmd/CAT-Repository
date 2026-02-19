@@ -1,0 +1,45 @@
+<section class="section" id="summary-oob" hx-swap-oob="true">
+  <div class="section-header">
+    <h3>Summary</h3>
+  </div>
+  <div class="summary-grid">
+    <div class="summary-card summary-released">
+      <span class="summary-label">Released</span>
+      <span class="summary-value">{{ summary.released | money }}</span>
+      <span class="summary-sub">Carrier + Draw + Endorsed</span>
+    </div>
+    <div class="summary-card summary-escrow">
+      <span class="summary-label">In Escrow</span>
+      <span class="summary-value">{{ summary.in_escrow | money }}</span>
+      <span class="summary-sub">Unresolved escrow</span>
+    </div>
+    <div class="summary-card">
+      <span class="summary-label">Net to Insured</span>
+      <span class="summary-value">{{ summary.net_to_insured | money }}</span>
+    </div>
+    <div class="summary-card">
+      <span class="summary-label">To Vendors</span>
+      <span class="summary-value">{{ summary.to_vendors | money }}</span>
+    </div>
+    <div class="summary-card highlight">
+      <span class="summary-label">Fee Owed</span>
+      <span class="summary-value">{{ summary.total_fee_owed | money }}</span>
+    </div>
+    <div class="summary-card highlight">
+      <span class="summary-label">Fee Collected</span>
+      <span class="summary-value">{{ summary.total_fee_collected | money }}</span>
+    </div>
+    <div class="summary-card">
+      <span class="summary-label">Deferred</span>
+      <span class="summary-value">{{ summary.total_deferred | money }}</span>
+    </div>
+    <div class="summary-card">
+      <span class="summary-label">Recouped</span>
+      <span class="summary-value">{{ summary.total_recouped | money }}</span>
+    </div>
+    <div class="summary-card">
+      <span class="summary-label">Outstanding Exp.</span>
+      <span class="summary-value">{{ summary.total_outstanding_expense | money }}</span>
+    </div>
+  </div>
+</section>

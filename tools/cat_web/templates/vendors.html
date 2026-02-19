@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Vendors{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h2>Vendors</h2>
+</div>
+
+<section class="section" id="vendors-section">
+  <div class="table-wrap">
+    <table class="table table-compact">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Phone</th>
+          <th>Email</th>
+          <th>Notes</th>
+          <th class="actions-col"></th>
+        </tr>
+      </thead>
+      <tbody id="vendors-tbody">
+        {% for v in vendors %}
+        <tr id="vendor-{{ v.id }}">
+          <td><strong>{{ v.name }}</strong></td>
+          <td class="text-small">{{ v.phone or '—' }}</td>
+          <td class="text-small">{{ v.email or '—' }}</td>
+          <td class="text-small text-muted">{{ v.notes or '' }}</td>
+          <td class="actions-col nowrap">
+            <button class="btn-icon btn-icon-danger"
+                    hx-delete="{{ url_for('vendor_delete', vendor_id=v.id) }}"
+                    hx-target="#vendors-section"
+                    hx-swap="outerHTML"
+                    hx-confirm="Delete vendor '{{ v.name }}'?">✕</button>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="text-center text-muted" style="padding:20px">No vendors yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-header"><h3>Add Vendor</h3></div>
+  <form hx-post="{{ url_for('vendor_create') }}"
+        hx-target="#vendors-section"
+        hx-swap="outerHTML">
+    <div class="form-grid-2" style="max-width:500px">
+      <div class="field">
+        <label>Name *</label>
+        <input type="text" name="name" class="input-sm" required placeholder="Company name">
+      </div>
+      <div class="field">
+        <label>Phone</label>
+        <input type="text" name="phone" class="input-sm" placeholder="(555) 000-0000">
+      </div>
+      <div class="field">
+        <label>Email</label>
+        <input type="email" name="email" class="input-sm" placeholder="email@example.com">
+      </div>
+      <div class="field">
+        <label>Notes</label>
+        <input type="text" name="notes" class="input-sm">
+      </div>
+    </div>
+    <button type="submit" class="btn btn-primary btn-sm">Add Vendor</button>
+  </form>
+</section>
+{% endblock %}

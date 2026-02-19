@@ -1,0 +1,71 @@
+{% set is_new = tx is none %}
+{% set row_id = "tx-new-row-placeholder" if is_new else "tx-" ~ tx.id %}
+{% set save_url = url_for('tx_create', claim_id=claim.id) if is_new else url_for('tx_update', claim_id=claim.id, tx_id=tx.id) %}
+{% set save_method = "post" if is_new else "put" %}
+{% set form_id = "tx-form-" ~ row_id %}
+
+<tr id="{{ row_id }}">
+  <td><input name="sequence_number" type="text" class="input-sm input-seq"
+             value="{{ tx.sequence_number if tx else '' }}" form="{{ form_id }}"></td>
+  <td><input name="date" type="date" class="input-sm"
+             value="{{ tx.date if tx else '' }}" form="{{ form_id }}"></td>
+  <td>
+    <select name="type" class="input-sm select-sm" form="{{ form_id }}"
+            onchange="toggleEscrowLink(this, '{{ form_id }}')">
+      <option value=""></option>
+      {% for t in tx_types %}
+      <option value="{{ t }}" {% if tx and tx.type == t %}selected{% endif %}>{{ t }}</option>
+      {% endfor %}
+    </select>
+  </td>
+  <td><input name="amount" type="number" step="0.01" class="input-sm input-num"
+             value="{{ tx.amount if tx else '' }}" form="{{ form_id }}"></td>
+  <td id="escrow-link-cell-{{ form_id }}"
+      style="{{ '' if (tx and tx.type and tx.type|lower == 'draw') else 'display:none' }}">
+    <select name="linked_escrow_id" class="input-sm select-sm" form="{{ form_id }}">
+      <option value="">— no escrow —</option>
+      {% for e in open_escrows %}
+      <option value="{{ e.id }}"
+              {% if tx and tx.linked_escrow_id == e.id %}selected{% endif %}>
+        #{{ e.sequence_number or e.id }} ({{ e.date or '?' }}, {{ (e.amount or 0) | money }})
+      </option>
+      {% endfor %}
+    </select>
+  </td>
+  <td><input name="notes" type="text" class="input-sm input-notes"
+             value="{{ tx.notes if tx else '' }}" form="{{ form_id }}"></td>
+  <td class="actions-col nowrap">
+    <button class="btn btn-primary btn-sm" form="{{ form_id }}" type="submit">Save</button>
+    {% if is_new %}
+    <button type="button" class="btn btn-ghost btn-sm"
+            onclick="document.getElementById('tx-new-row-placeholder').outerHTML='<tr id=&quot;tx-new-row-placeholder&quot;></tr>'">
+      ✕
+    </button>
+    {% else %}
+    <button type="button" class="btn btn-ghost btn-sm"
+            hx-get="{{ url_for('tx_edit_row', claim_id=claim.id, tx_id=tx.id) }}"
+            hx-target="#{{ row_id }}"
+            hx-swap="outerHTML">
+      ✕
+    </button>
+    {% endif %}
+  </td>
+</tr>
+
+<script>
+(function() {
+  const f = document.createElement('form');
+  f.id = '{{ form_id }}';
+  f.setAttribute('hx-{{ save_method }}', '{{ save_url }}');
+  f.setAttribute('hx-target', '#{{ row_id }}');
+  f.setAttribute('hx-swap', 'outerHTML');
+  f.style.display = 'none';
+  document.body.appendChild(f);
+  htmx.process(f);
+})();
+
+function toggleEscrowLink(sel, formId) {
+  const cell = document.getElementById('escrow-link-cell-' + formId);
+  if (cell) cell.style.display = sel.value.toLowerCase() === 'draw' ? '' : 'none';
+}
+</script>

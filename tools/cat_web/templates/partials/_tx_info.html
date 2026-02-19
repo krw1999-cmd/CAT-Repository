@@ -1,0 +1,64 @@
+<div class="card claim-header">
+  <div class="header-grid">
+    <div class="header-field">
+      <span class="label">Date</span>
+      <span class="value">{{ tx.date or '—' }}</span>
+    </div>
+    {% if tx.check_number %}
+    <div class="header-field">
+      <span class="label">Check #</span>
+      <span class="value bold">{{ tx.check_number }}</span>
+    </div>
+    {% endif %}
+    {% if tx.received_date %}
+    <div class="header-field">
+      <span class="label">Received</span>
+      <span class="value">{{ tx.received_date }}</span>
+    </div>
+    {% endif %}
+    {% if tx.payer %}
+    <div class="header-field">
+      <span class="label">Payer</span>
+      <span class="value">{{ tx.payer }}</span>
+    </div>
+    {% endif %}
+    {% if tx.payees_text %}
+    <div class="header-field" style="max-width:320px">
+      <span class="label">Payees</span>
+      <span class="value text-small">{{ tx.payees_text }}</span>
+    </div>
+    {% endif %}
+    {% if tx.endorsed %}
+    <div class="header-field">
+      <span class="label">Endorsed</span>
+      <span class="value">Yes</span>
+    </div>
+    {% endif %}
+    {% if tx.void %}
+    <div class="header-field">
+      <span class="label">VOID</span>
+      <span class="value" style="color:var(--red)">Yes</span>
+    </div>
+    {% endif %}
+    {% if tx.notes %}
+    <div class="header-field" style="max-width:360px">
+      <span class="label">Notes</span>
+      <span class="value text-small text-muted">{{ tx.notes }}</span>
+    </div>
+    {% endif %}
+    {% if tx.linked_escrow_id %}
+    <div class="header-field">
+      <span class="label">Linked Escrow</span>
+      <span class="value text-small">Escrow #{{ tx.linked_escrow_id }}</span>
+    </div>
+    {% endif %}
+  </div>
+  <div class="header-actions">
+    <button class="btn btn-ghost btn-sm"
+            hx-get="{{ url_for('tx_info_edit', claim_id=claim.id, tx_id=tx.id) }}"
+            hx-target="#tx-info"
+            hx-swap="innerHTML">
+      Edit
+    </button>
+  </div>
+</div>

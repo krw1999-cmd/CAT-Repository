@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Fee Recipients{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h2>Fee Recipients</h2>
+  <p class="text-muted text-small" style="margin-top:4px">
+    Global list of Waypoint payroll people (adjusters, sales, firm partners).
+  </p>
+</div>
+
+<section class="section" id="recipients-section">
+  <div class="table-wrap">
+    <table class="table table-compact">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Default Role</th>
+          <th class="actions-col"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in recipients %}
+        <tr id="recipient-{{ r.id }}">
+          <td><strong>{{ r.name }}</strong></td>
+          <td class="capitalize text-small">{{ r.default_role or '—' }}</td>
+          <td class="actions-col nowrap">
+            <button class="btn-icon btn-icon-danger"
+                    hx-delete="{{ url_for('fee_recipient_delete', rid=r.id) }}"
+                    hx-target="#recipients-section"
+                    hx-swap="outerHTML"
+                    hx-confirm="Remove '{{ r.name }}'?">✕</button>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="3" class="text-center text-muted" style="padding:20px">No fee recipients yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-header"><h3>Add Fee Recipient</h3></div>
+  <form hx-post="{{ url_for('fee_recipient_create') }}"
+        hx-target="#recipients-section"
+        hx-swap="outerHTML">
+    <div class="form-grid-2" style="max-width:400px">
+      <div class="field">
+        <label>Name *</label>
+        <input type="text" name="name" class="input-sm" required placeholder="Full name">
+      </div>
+      <div class="field">
+        <label>Default Role</label>
+        <select name="default_role" class="select-sm">
+          <option value="">— none —</option>
+          {% for r in roles %}
+          <option value="{{ r }}">{{ r|capitalize }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <button type="submit" class="btn btn-primary btn-sm">Add Recipient</button>
+  </form>
+</section>
+{% endblock %}

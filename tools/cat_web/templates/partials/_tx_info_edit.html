@@ -1,0 +1,97 @@
+<form hx-post="{{ url_for('tx_info_save', claim_id=claim.id, tx_id=tx.id) }}"
+      hx-target="#tx-info"
+      hx-swap="innerHTML">
+  <div class="card claim-header">
+    <div style="display:flex; flex-wrap:wrap; gap:14px; flex:1">
+
+      <div class="field" style="min-width:140px">
+        <label>Type</label>
+        <select name="type" class="select-sm" onchange="txInfoAutoFillPayer(this)">
+          {% for t in tx_types %}
+          <option value="{{ t }}" {% if tx.type == t %}selected{% endif %}>{{ t }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="field" style="min-width:120px">
+        <label>Date</label>
+        <input type="date" name="date" class="input-sm" value="{{ tx.date or '' }}">
+      </div>
+
+      <div class="field" style="min-width:110px">
+        <label>Check #</label>
+        <input type="text" name="check_number" class="input-sm" value="{{ tx.check_number or '' }}">
+      </div>
+
+      <div class="field" style="min-width:120px">
+        <label>Received</label>
+        <input type="date" name="received_date" class="input-sm" value="{{ tx.received_date or '' }}">
+      </div>
+
+      <div class="field" style="min-width:150px">
+        <label>Payer</label>
+        <input type="text" name="payer" class="input-sm" value="{{ tx.payer or '' }}">
+      </div>
+
+      <div class="field" style="min-width:200px; max-width:320px">
+        <label>Payees</label>
+        <input type="text" name="payees_text" class="input-sm" value="{{ tx.payees_text or '' }}">
+      </div>
+
+      <div class="field" style="min-width:70px; justify-content:flex-end">
+        <label>Endorsed</label>
+        <input type="checkbox" name="endorsed" value="1" {% if tx.endorsed %}checked{% endif %}
+               style="width:auto; margin-top:6px">
+      </div>
+
+      <div class="field" style="min-width:50px; justify-content:flex-end">
+        <label>VOID</label>
+        <input type="checkbox" name="void" value="1" {% if tx.void %}checked{% endif %}
+               style="width:auto; margin-top:6px">
+      </div>
+
+      <div class="field" style="min-width:200px; max-width:360px">
+        <label>Notes</label>
+        <input type="text" name="notes" class="input-sm" value="{{ tx.notes or '' }}">
+      </div>
+
+      {% if open_escrows %}
+      <div class="field" style="min-width:200px">
+        <label>Linked Escrow (Draw only)</label>
+        <select name="linked_escrow_id" class="select-sm">
+          <option value="">— none —</option>
+          {% for e in open_escrows %}
+          <option value="{{ e.id }}"
+                  {% if tx.linked_escrow_id == e.id %}selected{% endif %}>
+            #{{ e.sequence_number or e.id }} ({{ e.date or '?' }}, {{ (e.amount or 0) | money }})
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      {% endif %}
+
+    </div>
+    <div class="header-actions" style="display:flex; gap:8px; align-self:flex-start; margin-top:20px">
+      <button type="submit" class="btn btn-primary btn-sm">Save</button>
+      <button type="button" class="btn btn-ghost btn-sm"
+              hx-get="{{ url_for('tx_info_view', claim_id=claim.id, tx_id=tx.id) }}"
+              hx-target="#tx-info"
+              hx-swap="innerHTML">
+        Cancel
+      </button>
+    </div>
+  </div>
+</form>
+<script>
+(function() {
+  const _carrierName = {{ claim.carrier | tojson }};
+  const _checkTypes = ['escrow', 'escrow endorsed', 'carrier', 'draw'];
+  window.txInfoAutoFillPayer = function(sel) {
+    const payerInput = sel.closest('form').querySelector('[name="payer"]');
+    if (_carrierName && payerInput && !payerInput.value &&
+        _checkTypes.includes(sel.value.toLowerCase())) {
+      payerInput.value = _carrierName;
+    }
+  };
+})();
+</script>

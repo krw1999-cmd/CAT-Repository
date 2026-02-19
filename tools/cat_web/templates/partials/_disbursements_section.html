@@ -1,0 +1,73 @@
+{% set is_escrow_type = (tx.type or '')|lower == 'escrow' %}
+
+<section class="section" id="disbursements-section">
+  <div class="section-header">
+    {% if is_escrow_type %}
+      <h3>Planned Distribution <span class="status-badge status-planned">Hypothetical</span></h3>
+    {% else %}
+      <h3>Disbursements</h3>
+    {% endif %}
+  </div>
+
+  {% if is_escrow_type %}
+  <div class="escrow-notice">
+    <strong>Escrow / Hypothetical:</strong> These disbursements are planned but not yet accessible.
+    The mortgage company must endorse the check (change type to "Escrow Endorsed") or send a draw
+    before any money is released.
+  </div>
+  {% endif %}
+
+  <div class="table-wrap table-scroll">
+    <table class="table table-compact">
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Recipient</th>
+          <th class="num">Amount</th>
+          <th class="text-center">Fee?</th>
+          <th class="num">Fee %</th>
+          <th class="num">Fee Owed</th>
+          <th class="num">Collected</th>
+          <th class="num">Deferred</th>
+          <th class="num">Recouped</th>
+          <th>Notes</th>
+          <th class="actions-col"></th>
+        </tr>
+      </thead>
+      <tbody id="disburse-tbody">
+        {% for d in disbursements %}
+          {% include "partials/_disbursement_row.html" %}
+        {% endfor %}
+        <tr id="disburse-new-row-placeholder"></tr>
+      </tbody>
+      <tfoot>
+        <tr class="totals-row">
+          <td colspan="2" class="text-muted text-small">Totals</td>
+          <td class="num"><strong><span id="disburse-total-disbursed">{{ disburse_totals.total_disbursed | money }}</span></strong></td>
+          <td></td>
+          <td></td>
+          <td class="num"><span id="disburse-total-fee-owed">{{ disburse_totals.fee_owed | money }}</span></td>
+          <td class="num"><span id="disburse-total-fee-coll">{{ disburse_totals.fee_collected | money }}</span></td>
+          <td class="num"><span id="disburse-total-deferred">{{ disburse_totals.fee_deferred | money }}</span></td>
+          <td class="num"></td>
+          <td colspan="2"></td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+
+  <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap">
+    <button class="btn btn-ghost btn-sm"
+            hx-get="{{ url_for('disbursement_new_row', claim_id=claim.id, tx_id=tx.id) }}?type=insured"
+            hx-target="#disburse-new-row-placeholder"
+            hx-swap="outerHTML">
+      + To Insured
+    </button>
+    <button class="btn btn-ghost btn-sm"
+            hx-get="{{ url_for('disbursement_new_row', claim_id=claim.id, tx_id=tx.id) }}?type=vendor"
+            hx-target="#disburse-new-row-placeholder"
+            hx-swap="outerHTML">
+      + To Vendor
+    </button>
+  </div>
+</section>

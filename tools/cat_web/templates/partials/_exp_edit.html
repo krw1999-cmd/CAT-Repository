@@ -1,0 +1,51 @@
+{% set is_new = exp is none %}
+{% set row_id = "exp-new-row-placeholder" if is_new else "exp-" ~ exp.id %}
+{% set save_url = url_for('exp_create', claim_id=claim.id) if is_new else url_for('exp_update', claim_id=claim.id, exp_id=exp.id) %}
+{% set save_method = "post" if is_new else "put" %}
+{% set form_id = "exp-form-" ~ row_id %}
+
+<tr id="{{ row_id }}">
+  <td><input name="invoice_date" type="date" class="input-sm"
+             value="{{ exp.invoice_date if exp else '' }}" form="{{ form_id }}"></td>
+  <td><input name="payee_name" type="text" class="input-sm"
+             value="{{ exp.payee_name if exp else '' }}" form="{{ form_id }}"></td>
+  <td><input name="invoice_amount" type="number" step="0.01" class="input-sm input-num"
+             value="{{ exp.invoice_amount if exp else '' }}" form="{{ form_id }}"></td>
+  <td><input name="responsible_party" type="text" class="input-sm"
+             value="{{ exp.responsible_party if exp else '' }}" form="{{ form_id }}"></td>
+  <td><input name="unpaid_to_payee" type="number" step="0.01" class="input-sm input-num"
+             value="{{ exp.unpaid_to_payee if exp else '' }}" form="{{ form_id }}"></td>
+  <td><input name="client_outstanding" type="number" step="0.01" class="input-sm input-num"
+             value="{{ exp.client_outstanding if exp else '' }}" form="{{ form_id }}"></td>
+  <td><input name="wp_outstanding" type="number" step="0.01" class="input-sm input-num"
+             value="{{ exp.wp_outstanding if exp else '' }}" form="{{ form_id }}"></td>
+  <td class="actions-col">
+    <button class="btn btn-primary btn-sm" form="{{ form_id }}" type="submit">Save</button>
+    {% if is_new %}
+    <button type="button" class="btn btn-ghost btn-sm"
+            onclick="document.getElementById('exp-new-row-placeholder').outerHTML='<tr id=&quot;exp-new-row-placeholder&quot;></tr>'">
+      ✕
+    </button>
+    {% else %}
+    <button type="button" class="btn btn-ghost btn-sm"
+            hx-get="{{ url_for('exp_edit_row', claim_id=claim.id, exp_id=exp.id) }}"
+            hx-target="#{{ row_id }}"
+            hx-swap="outerHTML">
+      ✕
+    </button>
+    {% endif %}
+  </td>
+</tr>
+
+<script>
+(function() {
+  const f = document.createElement('form');
+  f.id = '{{ form_id }}';
+  f.setAttribute('hx-{{ save_method }}', '{{ save_url }}');
+  f.setAttribute('hx-target', '#{{ row_id }}');
+  f.setAttribute('hx-swap', 'outerHTML');
+  f.style.display = 'none';
+  document.body.appendChild(f);
+  htmx.process(f);
+})();
+</script>

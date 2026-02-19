@@ -1,0 +1,46 @@
+<section class="section">
+  <div class="section-header">
+    <h3>Payroll Splits</h3>
+    <span class="text-muted text-small">
+      Total: <strong id="split-total-pct">{{ "%.2f"|format(splits|sum(attribute='split_pct')) }}%</strong>
+      &nbsp;·&nbsp;
+      Fee: <strong id="split-total-fee">{{ (splits|sum(attribute='fee_amount')) | money }}</strong>
+    </span>
+  </div>
+  <div class="table-wrap">
+    <table class="table table-compact">
+      <thead>
+        <tr>
+          <th>Role</th>
+          <th>Name</th>
+          <th class="num">Split %</th>
+          <th class="num">Fee Amt</th>
+          <th class="num">Deferred</th>
+          <th class="num">Recouped</th>
+          <th class="actions-col"></th>
+        </tr>
+      </thead>
+      <tbody id="split-tbody">
+        {% for split in splits %}
+          {% include "partials/_split_row.html" %}
+        {% endfor %}
+        <tr id="split-new-row-placeholder"></tr>
+      </tbody>
+    </table>
+  </div>
+  <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap">
+    <button class="btn btn-ghost btn-sm"
+            hx-get="{{ url_for('split_new_row', claim_id=claim.id, tx_id=tx.id) }}"
+            hx-target="#split-new-row-placeholder"
+            hx-swap="outerHTML">
+      + Add Row
+    </button>
+    <button class="btn btn-ghost btn-sm"
+            hx-post="{{ url_for('split_seed', claim_id=claim.id, tx_id=tx.id) }}"
+            hx-target="#splits-section"
+            hx-swap="innerHTML"
+            hx-confirm="Reset splits from claim defaults? This will replace all current splits.">
+      ↺ Reset from Claim Defaults
+    </button>
+  </div>
+</section>

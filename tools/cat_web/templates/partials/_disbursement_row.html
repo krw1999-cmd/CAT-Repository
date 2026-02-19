@@ -1,0 +1,39 @@
+<tr id="disburse-{{ d.id }}">
+  <td>
+    {% if d.recipient_type == 'vendor' %}
+      <span class="badge-pill badge-vendor">Vendor</span>
+    {% else %}
+      <span class="badge-pill badge-insured">Insured</span>
+    {% endif %}
+  </td>
+  <td>{{ d.recipient_name or '—' }}</td>
+  <td class="num">{{ (d.amount or 0) | money }}</td>
+  <td class="text-center">
+    {% if d.fee_applies %}✓{% else %}<span class="text-muted">—</span>{% endif %}
+  </td>
+  <td class="num text-small">
+    {% if d.fee_pct is not none and d.fee_pct != '' %}
+      {{ "%.2f"|format(d.fee_pct) }}%
+    {% else %}
+      <span class="text-muted">default</span>
+    {% endif %}
+  </td>
+  <td class="num">{{ (d.fee_owed or 0) | money }}</td>
+  <td class="num">{{ (d.fee_collected or 0) | money }}</td>
+  <td class="num">{{ (d.fee_deferred or 0) | money }}</td>
+  <td class="num">{{ (d.fee_recouped or 0) | money }}</td>
+  <td class="text-small text-muted">{{ d.notes or '' }}</td>
+  <td class="actions-col nowrap">
+    <button class="btn-icon"
+            hx-get="{{ url_for('disbursement_edit_row', claim_id=claim.id, tx_id=tx.id, did=d.id) }}"
+            hx-target="#disburse-{{ d.id }}"
+            hx-swap="outerHTML"
+            title="Edit">✎</button>
+    <button class="btn-icon btn-icon-danger"
+            hx-delete="{{ url_for('disbursement_delete', claim_id=claim.id, tx_id=tx.id, did=d.id) }}"
+            hx-target="#disburse-{{ d.id }}"
+            hx-swap="outerHTML"
+            hx-confirm="Delete this disbursement?"
+            title="Delete">✕</button>
+  </td>
+</tr>

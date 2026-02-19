@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+{% block title %}{{ tx.sequence_number or '' }} {{ tx.type or 'Transaction' }} — {{ claim.insured_name }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <a href="{{ url_for('claim_detail', claim_id=claim.id) }}" class="breadcrumb">
+      ← {{ claim.insured_name or 'Claim' }}
+    </a>
+    <h2>
+      {% if tx.sequence_number %}#{{ tx.sequence_number }} — {% endif %}
+      <span class="tx-type-badge tx-type-{{ (tx.type or 'other')|lower|replace(' ', '-') }}">
+        {{ tx.type or 'Transaction' }}
+      </span>
+      {% set is_escrow_type = (tx.type or '')|lower == 'escrow' %}
+      {% if is_escrow_type %}
+        <span class="status-badge status-planned" style="margin-left:8px">Planned</span>
+      {% endif %}
+    </h2>
+  </div>
+</div>
+
+{# ── Transaction Info ─────────────────────────────────────────────────────── #}
+<div id="tx-info">
+  {% include "partials/_tx_info.html" %}
+</div>
+
+<div class="detail-grid">
+
+  {# ── Left column ──────────────────────────────────────────────────────────── #}
+  <div class="detail-main">
+
+    {# Coverage allocation — only for check types #}
+    {% set check_types = ['escrow', 'escrow endorsed', 'carrier', 'draw'] %}
+    {% if (tx.type or '')|lower in check_types %}
+    <section class="section">
+      <div class="section-header">
+        <h3>Coverage Allocation</h3>
+        <span class="text-muted text-small">Total: <strong id="coverage-total">{{ (coverages|sum(attribute='amount')) | money }}</strong></span>
+      </div>
+      <div class="table-wrap">
+        <table class="table table-compact">
+          <thead>
+            <tr>
+              <th>Coverage</th>
+              <th class="num">Amount</th>
+              <th class="actions-col"></th>
+            </tr>
+          </thead>
+          <tbody id="coverage-tbody">
+            {% for cov in coverages %}
+              {% include "partials/_coverage_row.html" %}
+            {% endfor %}
+            <tr id="coverage-new-row-placeholder"></tr>
+          </tbody>
+        </table>
+      </div>
+      <button class="btn btn-ghost btn-sm"
+              hx-get="{{ url_for('coverage_new_row', claim_id=claim.id, tx_id=tx.id) }}"
+              hx-target="#coverage-new-row-placeholder"
+              hx-swap="outerHTML">
+        + Add Coverage
+      </button>
+    </section>
+    {% endif %}
+
+    {# ── Disbursements ─────────────────────────────────────────────────────── #}
+    {% if (tx.type or '')|lower in check_types %}
+    {% include "partials/_disbursements_section.html" %}
+    {% endif %}
+
+    {# ── Linked Escrow Warning (Draw transactions only) ─────────────────────── #}
+    {% if linked_escrow and escrow_disbursements %}
+    <section class="section">
+      <details class="escrow-warning-card" open>
+        <summary>
+          <strong>Planned from Escrow #{{ linked_escrow.sequence_number or linked_escrow.id }}</strong>
+          ({{ linked_escrow.date or '?' }}, {{ (linked_escrow.amount or 0) | money }})
+          — checklist of planned disbursements
+        </summary>
+        <div class="escrow-checklist">
+          {% for ed in escrow_disbursements %}
+          {% set is_covered = ed.recipient_name|lower in covered_recipients %}
+          <div class="escrow-check-item {{ 'covered' if is_covered else 'missing' }}">
+            <span class="check-icon">{{ '✓' if is_covered else '✗' }}</span>
+            <span class="check-label">
+              {{ ed.recipient_name or '—' }}
+              <span class="text-muted text-small">
+                ({{ ed.recipient_type }}, {{ (ed.amount or 0) | money }})
+              </span>
+            </span>
+            {% if not is_covered %}
+            <span class="check-missing-note">Not yet in this draw's disbursements</span>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </details>
+    </section>
+    {% endif %}
+
+    {# ── Payroll Splits ───────────────────────────────────────────────────── #}
+    <div id="splits-section">
+      {% include "partials/_splits_section.html" %}
+    </div>
+
+  </div>
+
+  {# ── Right sidebar ────────────────────────────────────────────────────────── #}
+  <div class="detail-sidebar">
+    <div class="card">
+      <div class="sidebar-label">Check Amount</div>
+      <div class="sidebar-value">{{ (tx.amount or 0) | money }}</div>
+
+      {% set is_escrow_type = (tx.type or '')|lower == 'escrow' %}
+      <div class="sidebar-label">Status</div>
+      <div class="sidebar-value" style="font-size:14px">
+        {% if is_escrow_type %}
+          <span class="status-badge status-planned">Planned / Hypothetical</span>
+        {% else %}
+          <span class="status-badge status-released">Released</span>
+        {% endif %}
+      </div>
+
+      <div class="sidebar-divider"></div>
+
+      <div class="sidebar-label">Net to Insured</div>
+      <div class="sidebar-value text-green">
+        <span id="disburse-sidebar-net">{{ disburse_totals.net_to_insured | money }}</span>
+      </div>
+
+      <div class="sidebar-label">To Vendors</div>
+      <div class="sidebar-value">
+        <span id="disburse-sidebar-vendors">{{ disburse_totals.to_vendors | money }}</span>
+      </div>
+
+      <div class="sidebar-divider"></div>
+
+      <div class="sidebar-label">Fee Owed</div>
+      <div class="sidebar-value highlight">
+        <span id="disburse-sidebar-fee-owed">{{ disburse_totals.fee_owed | money }}</span>
+      </div>
+
+      <div class="sidebar-label">Fee Collected</div>
+      <div class="sidebar-value {% if disburse_totals.fee_collected > 0 %}text-green{% endif %}">
+        <span id="disburse-sidebar-fee-coll">{{ disburse_totals.fee_collected | money }}</span>
+      </div>
+
+      {% if disburse_totals.fee_deferred > 0 %}
+      <div class="sidebar-label">Deferred</div>
+      <div class="sidebar-value">
+        <span id="disburse-sidebar-deferred">{{ disburse_totals.fee_deferred | money }}</span>
+      </div>
+      {% else %}
+      <span id="disburse-sidebar-deferred" style="display:none">$0.00</span>
+      {% endif %}
+
+      {% if disburse_totals.fee_recouped > 0 %}
+      <div class="sidebar-label">Recouped</div>
+      <div class="sidebar-value">
+        <span id="disburse-sidebar-recouped">{{ disburse_totals.fee_recouped | money }}</span>
+      </div>
+      {% else %}
+      <span id="disburse-sidebar-recouped" style="display:none">$0.00</span>
+      {% endif %}
+    </div>
+  </div>
+
+</div>
+
+<script>
+const contractPct = {{ (claim.contract_pct or 0) / 100 }};
+</script>
+{% endblock %}

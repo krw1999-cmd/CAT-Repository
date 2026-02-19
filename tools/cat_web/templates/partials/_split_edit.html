@@ -1,0 +1,55 @@
+{% set is_new = split is none %}
+{% set row_id = "split-new-row-placeholder" if is_new else "split-" ~ split.id %}
+{% set save_url = url_for('split_create', claim_id=claim.id, tx_id=tx.id) if is_new else url_for('split_update', claim_id=claim.id, tx_id=tx.id, sid=split.id) %}
+{% set save_method = "post" if is_new else "put" %}
+{% set form_id = "split-form-" ~ row_id %}
+
+<tr id="{{ row_id }}">
+  <td>
+    <select name="role" class="input-sm select-sm" form="{{ form_id }}">
+      {% for r in roles %}
+      <option value="{{ r }}" {% if split and split.role == r %}selected{% endif %}>{{ r }}</option>
+      {% endfor %}
+    </select>
+  </td>
+  <td>
+    <input type="text" name="name" class="input-sm" style="min-width:140px"
+           value="{{ split.name if split else '' }}" form="{{ form_id }}">
+  </td>
+  <td>
+    <input type="number" name="split_pct" step="0.01" class="input-sm input-num"
+           value="{{ split.split_pct if split else '' }}" form="{{ form_id }}">
+  </td>
+  <td class="num text-muted">—</td>
+  <td class="num text-muted">—</td>
+  <td class="num text-muted">—</td>
+  <td class="actions-col">
+    <button class="btn btn-primary btn-sm" form="{{ form_id }}" type="submit">Save</button>
+    {% if is_new %}
+    <button type="button" class="btn btn-ghost btn-sm"
+            onclick="document.getElementById('split-new-row-placeholder').outerHTML='<tr id=&quot;split-new-row-placeholder&quot;></tr>'">
+      ✕
+    </button>
+    {% else %}
+    <button type="button" class="btn btn-ghost btn-sm"
+            hx-get="{{ url_for('split_view_row', claim_id=claim.id, tx_id=tx.id, sid=split.id) }}"
+            hx-target="#{{ row_id }}"
+            hx-swap="outerHTML">
+      ✕
+    </button>
+    {% endif %}
+  </td>
+</tr>
+
+<script>
+(function() {
+  const f = document.createElement('form');
+  f.id = '{{ form_id }}';
+  f.setAttribute('hx-{{ save_method }}', '{{ save_url }}');
+  f.setAttribute('hx-target', '#{{ row_id }}');
+  f.setAttribute('hx-swap', 'outerHTML');
+  f.style.display = 'none';
+  document.body.appendChild(f);
+  htmx.process(f);
+})();
+</script>

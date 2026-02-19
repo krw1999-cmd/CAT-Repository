@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Claims{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h2>Claims</h2>
+  <a href="{{ url_for('new_claim') }}" class="btn btn-primary">+ New Claim</a>
+</div>
+
+{% if claims %}
+<div class="table-wrap">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Job #</th>
+        <th>Insured</th>
+        <th>Carrier</th>
+        <th>Claim #</th>
+        <th class="num">Contract %</th>
+        <th class="num">Total Collected</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in claims %}
+      <tr class="row-link" onclick="location.href='{{ url_for('claim_detail', claim_id=c.id) }}'">
+        <td>{{ c.job_number or '—' }}</td>
+        <td class="bold">{{ c.insured_name or '—' }}</td>
+        <td>{{ c.carrier or '—' }}</td>
+        <td>{{ c.claim_number or '—' }}</td>
+        <td class="num">{{ "%.1f"|format(c.contract_pct or 0) }}%</td>
+        <td class="num">{{ (c.total_collected_sum or 0) | money }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="empty-state">
+  <p>No claims yet.</p>
+  <a href="{{ url_for('new_claim') }}" class="btn btn-primary">Create your first claim</a>
+</div>
+{% endif %}
+{% endblock %}

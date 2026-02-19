@@ -1,0 +1,32 @@
+<div class="card claim-header">
+  <div class="header-grid">
+    <div class="header-field">
+      <span class="label">Insured</span>
+      <span class="value bold">{{ claim.insured_name or '—' }}</span>
+    </div>
+    <div class="header-field">
+      <span class="label">Carrier</span>
+      <span class="value">{{ claim.carrier or '—' }}</span>
+    </div>
+    <div class="header-field">
+      <span class="label">Contract %</span>
+      <span class="value">{{ "%.2f"|format(claim.contract_pct or 0) }}%</span>
+    </div>
+    <div class="header-field">
+      <span class="label">Claim #</span>
+      <span class="value">{{ claim.claim_number or '—' }}</span>
+    </div>
+    <div class="header-field">
+      <span class="label">Job #</span>
+      <span class="value">{{ claim.job_number or '—' }}</span>
+    </div>
+  </div>
+  <div class="header-actions">
+    <button class="btn btn-ghost btn-sm"
+            hx-get="{{ url_for('claim_header_edit', claim_id=claim.id) }}"
+            hx-target="#claim-header"
+            hx-swap="innerHTML">
+      Edit
+    </button>
+  </div>
+</div>

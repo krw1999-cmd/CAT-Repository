@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Check Queue{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h2>Check Queue</h2>
+  <span class="badge">{{ checks|length }} unmatched</span>
+</div>
+
+<p class="text-muted">
+  Checks processed by check_processor that haven't been linked to a claim yet.
+  Matching a check will auto-create a transaction on the selected claim.
+</p>
+
+{% if checks %}
+<div class="table-wrap">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Check #</th>
+        <th class="num">Amount</th>
+        <th>Coverage</th>
+        <th>Insured</th>
+        <th>Claim #</th>
+        <th>Payees</th>
+        <th>Processed</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for ck in checks %}
+      <tr id="check-{{ ck.id }}">
+        <td>{{ ck.check_date or '—' }}</td>
+        <td>{{ ck.check_number or '—' }}</td>
+        <td class="num">{{ ck.amount or '—' }}</td>
+        <td>{{ ck.coverage or '—' }}</td>
+        <td>{{ ck.insured_name or '—' }}</td>
+        <td>{{ ck.claim_number or '—' }}</td>
+        <td class="text-small">{{ ck.payees or '—' }}</td>
+        <td class="text-small">{{ ck.processed_at[:10] if ck.processed_at else '—' }}</td>
+        <td>
+          <form method="POST" action="{{ url_for('check_match', check_id=ck.id) }}"
+                style="display:flex;gap:6px;align-items:center">
+            <select name="claim_id" class="select-sm" required>
+              <option value="">— match to claim —</option>
+              {% for cl in all_claims %}
+              <option value="{{ cl.id }}">
+                {{ cl.job_number or cl.id }} — {{ cl.insured_name or 'Unknown' }}
+              </option>
+              {% endfor %}
+            </select>
+            <button type="submit" class="btn btn-primary btn-sm">Match</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="empty-state">
+  <p>No unmatched checks. All checks have been linked to claims.</p>
+</div>
+{% endif %}
+{% endblock %}

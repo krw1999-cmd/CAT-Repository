@@ -1,0 +1,18 @@
+<tr id="assignee-{{ assignee.id }}">
+  <td class="capitalize">{{ assignee.role }}</td>
+  <td>{{ assignee.name }}</td>
+  <td class="num">{{ "%.2f"|format(assignee.split_pct or 0) }}%</td>
+  <td class="actions-col">
+    <button class="btn-icon"
+            hx-get="{{ url_for('assignee_edit_row', claim_id=claim.id, aid=assignee.id) }}"
+            hx-target="#assignee-{{ assignee.id }}"
+            hx-swap="outerHTML"
+            title="Edit">✎</button>
+    <button class="btn-icon btn-icon-danger"
+            hx-delete="{{ url_for('assignee_delete', claim_id=claim.id, aid=assignee.id) }}"
+            hx-target="#assignee-{{ assignee.id }}"
+            hx-swap="outerHTML"
+            hx-confirm="Remove this assignee?"
+            title="Delete">✕</button>
+  </td>
+</tr>

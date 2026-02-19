@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}CAT Web{% endblock %} — Waypoint Adjusting</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script src="https://unpkg.com/htmx.org@2.0.4" crossorigin="anonymous"></script>
+</head>
+<body>
+
+{% if current_user.is_authenticated %}
+<nav class="nav">
+  <div class="nav-brand">
+    <a href="{{ url_for('claims_list') }}">Waypoint CAT</a>
+  </div>
+  <div class="nav-links">
+    <a href="{{ url_for('claims_list') }}" class="{% if request.endpoint == 'claims_list' %}active{% endif %}">Claims</a>
+    <a href="{{ url_for('checks_queue') }}" class="{% if request.endpoint == 'checks_queue' %}active{% endif %}">Check Queue</a>
+    <a href="{{ url_for('vendors_list') }}" class="{% if request.endpoint == 'vendors_list' %}active{% endif %}">Vendors</a>
+    <a href="{{ url_for('fee_recipients_list') }}" class="{% if request.endpoint == 'fee_recipients_list' %}active{% endif %}">Fee Recipients</a>
+  </div>
+  <div class="nav-user">
+    <span>{{ current_user.username }}</span>
+    <a href="{{ url_for('logout') }}">Log out</a>
+  </div>
+</nav>
+{% endif %}
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+  <div class="flash-container">
+    {% for category, message in messages %}
+    <div class="flash flash-{{ category }}">{{ message }}</div>
+    {% endfor %}
+  </div>
+  {% endif %}
+{% endwith %}
+
+<main class="main">
+  {% block content %}{% endblock %}
+</main>
+
+</body>
+</html>

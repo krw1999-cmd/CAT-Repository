@@ -1,0 +1,48 @@
+{% set is_new = cov is none %}
+{% set row_id = "coverage-new-row-placeholder" if is_new else "coverage-" ~ cov.id %}
+{% set save_url = url_for('coverage_create', claim_id=claim.id, tx_id=tx.id) if is_new else url_for('coverage_update', claim_id=claim.id, tx_id=tx.id, cid=cov.id) %}
+{% set save_method = "post" if is_new else "put" %}
+{% set form_id = "coverage-form-" ~ row_id %}
+
+<tr id="{{ row_id }}">
+  <td>
+    <select name="coverage_type" class="input-sm select-sm" form="{{ form_id }}">
+      {% for ct in coverage_types %}
+      <option value="{{ ct }}" {% if cov and cov.coverage_type == ct %}selected{% endif %}>{{ ct }}</option>
+      {% endfor %}
+    </select>
+  </td>
+  <td>
+    <input type="number" name="amount" step="0.01" class="input-sm input-num"
+           value="{{ cov.amount if cov else '' }}" form="{{ form_id }}">
+  </td>
+  <td class="actions-col">
+    <button class="btn btn-primary btn-sm" form="{{ form_id }}" type="submit">Save</button>
+    {% if is_new %}
+    <button type="button" class="btn btn-ghost btn-sm"
+            onclick="document.getElementById('coverage-new-row-placeholder').outerHTML='<tr id=&quot;coverage-new-row-placeholder&quot;></tr>'">
+      ✕
+    </button>
+    {% else %}
+    <button type="button" class="btn btn-ghost btn-sm"
+            hx-get="{{ url_for('coverage_view_row', claim_id=claim.id, tx_id=tx.id, cid=cov.id) }}"
+            hx-target="#{{ row_id }}"
+            hx-swap="outerHTML">
+      ✕
+    </button>
+    {% endif %}
+  </td>
+</tr>
+
+<script>
+(function() {
+  const f = document.createElement('form');
+  f.id = '{{ form_id }}';
+  f.setAttribute('hx-{{ save_method }}', '{{ save_url }}');
+  f.setAttribute('hx-target', '#{{ row_id }}');
+  f.setAttribute('hx-swap', 'outerHTML');
+  f.style.display = 'none';
+  document.body.appendChild(f);
+  htmx.process(f);
+})();
+</script>

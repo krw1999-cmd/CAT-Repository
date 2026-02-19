@@ -1,0 +1,29 @@
+<tr id="split-{{ split.id }}">
+  <td class="capitalize">{{ split.role }}</td>
+  <td>{{ split.name }}</td>
+  <td class="num">{{ "%.2f"|format(split.split_pct or 0) }}%</td>
+  <td class="num">{{ (split.fee_amount or 0) | money }}</td>
+  {% if (split.deferred_amount or 0) != 0 %}
+  <td class="num text-muted">{{ (split.deferred_amount or 0) | money }}</td>
+  {% else %}
+  <td class="num text-muted">—</td>
+  {% endif %}
+  {% if (split.recouped_amount or 0) != 0 %}
+  <td class="num text-muted">{{ (split.recouped_amount or 0) | money }}</td>
+  {% else %}
+  <td class="num text-muted">—</td>
+  {% endif %}
+  <td class="actions-col">
+    <button class="btn-icon"
+            hx-get="{{ url_for('split_edit_row', claim_id=claim.id, tx_id=tx.id, sid=split.id) }}"
+            hx-target="#split-{{ split.id }}"
+            hx-swap="outerHTML"
+            title="Edit">✎</button>
+    <button class="btn-icon btn-icon-danger"
+            hx-delete="{{ url_for('split_delete', claim_id=claim.id, tx_id=tx.id, sid=split.id) }}"
+            hx-target="#split-{{ split.id }}"
+            hx-swap="outerHTML"
+            hx-confirm="Remove this split?"
+            title="Delete">✕</button>
+  </td>
+</tr>

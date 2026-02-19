@@ -1,0 +1,54 @@
+{% set tx_type_lower = (tx.type or '')|lower|replace(' ', '-') %}
+{% set is_escrow = (tx.type or '')|lower == 'escrow' %}
+{% set is_released = (tx.type or '')|lower in ['carrier', 'draw', 'escrow endorsed'] %}
+
+{# Choose display values: prefer disbursement-computed if present #}
+{% if tx.get('has_disbursements') %}
+  {% set show_fee_owed      = tx.disburse_fee_owed %}
+  {% set show_fee_collected = tx.disburse_fee_collected %}
+  {% set show_deferred      = tx.disburse_fee_deferred %}
+  {% set show_net_insured   = tx.net_to_insured %}
+  {% set show_vendors       = tx.to_vendors %}
+{% else %}
+  {% set show_fee_owed      = tx.fee_owed or 0 %}
+  {% set show_fee_collected = tx.fee_collected or 0 %}
+  {% set show_deferred      = tx.deferred or 0 %}
+  {% set show_net_insured   = 0 %}
+  {% set show_vendors       = 0 %}
+{% endif %}
+
+<tr id="tx-{{ tx.id }}" class="row-link tx-type-row tx-border-{{ tx_type_lower }}"
+    onclick="location.href='{{ url_for('tx_detail', claim_id=claim.id, tx_id=tx.id) }}'">
+  <td>{{ tx.sequence_number or '' }}</td>
+  <td class="nowrap">{{ tx.date or '—' }}</td>
+  <td>
+    <span class="tx-type-badge tx-type-{{ tx_type_lower }}">{{ tx.type or '—' }}</span>
+  </td>
+  <td class="num">{{ (tx.amount or 0) | money }}</td>
+  <td>
+    {% if is_escrow %}
+      <span class="status-badge status-planned">Planned</span>
+    {% elif is_released %}
+      <span class="status-badge status-released">Released</span>
+    {% endif %}
+  </td>
+  <td class="num">{% if show_net_insured %}{{ show_net_insured | money }}{% else %}—{% endif %}</td>
+  <td class="num">{% if show_vendors %}{{ show_vendors | money }}{% else %}—{% endif %}</td>
+  <td class="num">{{ show_fee_owed | money }}</td>
+  <td class="num">{{ show_fee_collected | money }}</td>
+  <td class="num">{{ show_deferred | money }}</td>
+  <td>{{ tx.notes or '' }}</td>
+  <td class="actions-col nowrap" onclick="event.stopPropagation()">
+    <button class="btn-icon"
+            hx-get="{{ url_for('tx_edit_row', claim_id=tx.claim_id, tx_id=tx.id) }}"
+            hx-target="#tx-{{ tx.id }}"
+            hx-swap="outerHTML"
+            title="Edit">✎</button>
+    <button class="btn-icon btn-icon-danger"
+            hx-delete="{{ url_for('tx_delete', claim_id=tx.claim_id, tx_id=tx.id) }}"
+            hx-target="#tx-{{ tx.id }}"
+            hx-swap="outerHTML"
+            hx-confirm="Delete this transaction?"
+            title="Delete">✕</button>
+  </td>
+</tr>

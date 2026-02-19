@@ -1,0 +1,20 @@
+<tr id="limit-{{ lim.id }}">
+  <td>{{ lim.coverage_type }}</td>
+  <td class="num">{{ (lim.base_limit or 0) | money }}</td>
+  <td class="num">{{ (lim.extended_limit or 0) | money }}</td>
+  <td class="num">{{ (lim.paid or 0) | money }}</td>
+  <td class="num">{{ (lim.remaining or 0) | money }}</td>
+  <td class="actions-col">
+    <button class="btn-icon"
+            hx-get="{{ url_for('limit_edit_row', claim_id=claim.id, limit_id=lim.id) }}"
+            hx-target="#limit-{{ lim.id }}"
+            hx-swap="outerHTML"
+            title="Edit">✎</button>
+    <button class="btn-icon btn-icon-danger"
+            hx-delete="{{ url_for('limit_update', claim_id=claim.id, limit_id=lim.id) }}"
+            hx-target="#limit-{{ lim.id }}"
+            hx-swap="outerHTML"
+            hx-confirm="Delete this limit row?"
+            title="Delete">✕</button>
+  </td>
+</tr>

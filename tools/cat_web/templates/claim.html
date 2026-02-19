@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% block title %}{{ claim.insured_name or 'Claim' }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <a href="{{ url_for('claims_list') }}" class="breadcrumb">← Claims</a>
+    <h2>{{ claim.insured_name or 'Unnamed Claim' }}</h2>
+  </div>
+</div>
+
+{# ── Claim Header ────────────────────────────────────────────────────────── #}
+<div id="claim-header">
+  {% include "partials/_claim_header.html" %}
+</div>
+
+{# ── Policy Limits ────────────────────────────────────────────────────────── #}
+<section class="section">
+  <div class="section-header">
+    <h3>Policy Limits</h3>
+  </div>
+  <div class="table-wrap">
+    <table class="table table-compact">
+      <thead>
+        <tr>
+          <th>Coverage</th>
+          <th class="num">Base Limit</th>
+          <th class="num">Extended</th>
+          <th class="num">Paid</th>
+          <th class="num">Remaining</th>
+          <th class="actions-col"></th>
+        </tr>
+      </thead>
+      <tbody id="limits-tbody">
+        {% for lim in limits %}
+          {% include "partials/_limit_row.html" %}
+        {% endfor %}
+        <tr id="limit-new-row-placeholder"></tr>
+      </tbody>
+    </table>
+  </div>
+  <button class="btn btn-ghost btn-sm"
+          hx-get="{{ url_for('limit_new_row', claim_id=claim.id) }}"
+          hx-target="#limit-new-row-placeholder"
+          hx-swap="outerHTML">
+    + Add Limit
+  </button>
+</section>
+
+{# ── Transactions ─────────────────────────────────────────────────────────── #}
+<section class="section">
+  <div class="section-header">
+    <h3>Transactions</h3>
+  </div>
+  <div class="table-wrap table-scroll">
+    <table class="table table-compact" id="tx-table">
+      <thead>
+        <tr>
+          <th>Check #</th>
+          <th>Date</th>
+          <th>Type</th>
+          <th class="num">Amount</th>
+          <th>Status</th>
+          <th class="num">Net to Insured</th>
+          <th class="num">To Vendors</th>
+          <th class="num">Fee Owed</th>
+          <th class="num">Fee Coll.</th>
+          <th class="num">Deferred</th>
+          <th>Notes</th>
+          <th class="actions-col"></th>
+        </tr>
+      </thead>
+      <tbody id="tx-tbody">
+        {% for tx in transactions %}
+          {% include "partials/_tx_row.html" %}
+        {% endfor %}
+        <tr id="tx-new-row-placeholder"></tr>
+      </tbody>
+    </table>
+  </div>
+  <button class="btn btn-ghost btn-sm"
+          hx-get="{{ url_for('tx_new_row', claim_id=claim.id) }}"
+          hx-target="#tx-new-row-placeholder"
+          hx-swap="outerHTML">
+    + Add Transaction
+  </button>
+</section>
+
+{# ── Summary ──────────────────────────────────────────────────────────────── #}
+<div id="summary-oob">
+  {% include "partials/_summary.html" %}
+</div>
+
+{# ── Expenses ─────────────────────────────────────────────────────────────── #}
+<section class="section">
+  <div class="section-header">
+    <h3>Expenses</h3>
+  </div>
+  <div class="table-wrap">
+    <table class="table table-compact">
+      <thead>
+        <tr>
+          <th>Invoice Date</th>
+          <th>Payee</th>
+          <th class="num">Amount</th>
+          <th>Responsible Party</th>
+          <th class="num">Unpaid to Payee</th>
+          <th class="num">Client Outst.</th>
+          <th class="num">WP Outst.</th>
+          <th class="actions-col"></th>
+        </tr>
+      </thead>
+      <tbody id="exp-tbody">
+        {% for exp in expenses %}
+          {% include "partials/_exp_row.html" %}
+        {% endfor %}
+        <tr id="exp-new-row-placeholder"></tr>
+      </tbody>
+    </table>
+  </div>
+  <button class="btn btn-ghost btn-sm"
+          hx-get="{{ url_for('exp_new_row', claim_id=claim.id) }}"
+          hx-target="#exp-new-row-placeholder"
+          hx-swap="outerHTML">
+    + Add Expense
+  </button>
+</section>
+
+{# ── Assignees (claim-level split defaults) ───────────────────────────────── #}
+<section class="section">
+  <div class="section-header">
+    <h3>Payroll Assignees</h3>
+    <span class="text-muted text-small">Total: <strong id="assignee-total">{{ "%.2f"|format(assignees|sum(attribute='split_pct'))  }}%</strong></span>
+  </div>
+  <div class="table-wrap">
+    <table class="table table-compact">
+      <thead>
+        <tr>
+          <th>Role</th>
+          <th>Name</th>
+          <th class="num">Split %</th>
+          <th class="actions-col"></th>
+        </tr>
+      </thead>
+      <tbody id="assignees-tbody">
+        {% for assignee in assignees %}
+          {% include "partials/_assignee_row.html" %}
+        {% endfor %}
+        <tr id="assignee-new-row-placeholder"></tr>
+      </tbody>
+    </table>
+  </div>
+  <button class="btn btn-ghost btn-sm"
+          hx-get="{{ url_for('assignee_new_row', claim_id=claim.id) }}"
+          hx-target="#assignee-new-row-placeholder"
+          hx-swap="outerHTML">
+    + Add Assignee
+  </button>
+</section>
+
+<script>
+const contractPct = {{ (claim.contract_pct or 0) / 100 }};
+</script>
+{% endblock %}

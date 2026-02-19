@@ -1,0 +1,17 @@
+<tr id="coverage-{{ cov.id }}">
+  <td>{{ cov.coverage_type }}</td>
+  <td class="num">{{ (cov.amount or 0) | money }}</td>
+  <td class="actions-col">
+    <button class="btn-icon"
+            hx-get="{{ url_for('coverage_edit_row', claim_id=claim.id, tx_id=tx.id, cid=cov.id) }}"
+            hx-target="#coverage-{{ cov.id }}"
+            hx-swap="outerHTML"
+            title="Edit">✎</button>
+    <button class="btn-icon btn-icon-danger"
+            hx-delete="{{ url_for('coverage_delete', claim_id=claim.id, tx_id=tx.id, cid=cov.id) }}"
+            hx-target="#coverage-{{ cov.id }}"
+            hx-swap="outerHTML"
+            hx-confirm="Remove this coverage row?"
+            title="Delete">✕</button>
+  </td>
+</tr>

@@ -1,0 +1,22 @@
+<tr id="exp-{{ exp.id }}">
+  <td class="nowrap">{{ exp.invoice_date or '—' }}</td>
+  <td>{{ exp.payee_name or '—' }}</td>
+  <td class="num">{{ (exp.invoice_amount or 0) | money }}</td>
+  <td>{{ exp.responsible_party or '—' }}</td>
+  <td class="num">{{ (exp.unpaid_to_payee or 0) | money }}</td>
+  <td class="num">{{ (exp.client_outstanding or 0) | money }}</td>
+  <td class="num">{{ (exp.wp_outstanding or 0) | money }}</td>
+  <td class="actions-col">
+    <button class="btn-icon"
+            hx-get="{{ url_for('exp_edit_row', claim_id=exp.claim_id, exp_id=exp.id) }}"
+            hx-target="#exp-{{ exp.id }}"
+            hx-swap="outerHTML"
+            title="Edit">✎</button>
+    <button class="btn-icon btn-icon-danger"
+            hx-delete="{{ url_for('exp_delete', claim_id=exp.claim_id, exp_id=exp.id) }}"
+            hx-target="#exp-{{ exp.id }}"
+            hx-swap="outerHTML"
+            hx-confirm="Delete this expense?"
+            title="Delete">✕</button>
+  </td>
+</tr>
