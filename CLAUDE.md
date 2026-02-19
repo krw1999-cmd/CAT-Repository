@@ -61,12 +61,16 @@ python tools/<tool_name>/main.py
 | Tool | Status | Notes |
 |------|--------|-------|
 | token_tracker | Ready | Logs Claude session usage; run manually after each session |
+| check_processor | Ready | Batch PDF scan → split, OCR, rename, SQLite |
+| cat_web | Ready | Flask web app — claims, transactions, expenses, check queue, auth |
 
 ### In progress
 - Nothing currently in progress
 
 ### Up next
-- First domain-specific tool (TBD based on project vision)
+- Phase 3 completion: update check_processor to write to cat_web's `cat.db` instead of standalone `checks.db`
+- Phase 4: payroll export (format TBD — share payroll doc when ready)
+- Phase 5: deploy to Railway.app
 
 ---
 

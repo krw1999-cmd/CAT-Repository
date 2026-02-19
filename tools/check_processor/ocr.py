@@ -117,7 +117,9 @@ def find_check_fronts(images: List[Image.Image]) -> List[int]:
 def extract_fields(images: List[Image.Image]) -> dict:
     """Send check images to Claude Vision and extract structured fields.
 
-    Returns a dict with keys: date, check_number, amount, coverage.
+    Returns a dict with keys: date, check_number, amount, coverage, carrier,
+    payee, co_payee, insured_name, claim_number, policy_number, loss_date,
+    loss_address, bank, memo.
     Any field not found returns an empty string.
     """
     client = _get_client()
@@ -138,8 +140,8 @@ def extract_fields(images: List[Image.Image]) -> dict:
     image_blocks.append({
         "type": "text",
         "text": (
-            "These are images of a paper check (front and back). "
-            "Extract the following fields and reply in this exact format, "
+            "These are images of a paper check and possibly an accompanying letter or "
+            "remittance stub. Extract the following fields and reply in this exact format, "
             "one field per line, nothing else:\n"
             "DATE: MM/DD/YYYY\n"
             "CHECK_NUMBER: (the full check number exactly as printed, including any letters)\n"
@@ -152,9 +154,21 @@ def extract_fields(images: List[Image.Image]) -> dict:
             "- building or dwelling → building\n"
             "- contents → contents\n"
             "- ALE, additional living, loss of use → ALE\n"
-            "Leave blank if not found.)\n\n"
-            "If you cannot find a field, leave it blank after the colon. "
-            "Do not include any explanation."
+            "Leave blank if not found.)\n"
+            "PAYEES: (the full 'Pay to the order of' line exactly as printed — all names)\n"
+            "CLIENT: (the insured homeowner — never Waypoint Adjusting, never a mortgage company, never a vendor)\n"
+            "MORTGAGE_CO: (mortgage servicer name if listed on the check — e.g. Wells Fargo, Chase, ServiceMac)\n"
+            "VENDOR: (contractor, vendor, or other third party if listed — not Waypoint Adjusting, not a mortgage company)\n"
+            "INSURED_NAME: (the policy holder's name — may appear on letter, stub, or memo — never Waypoint Adjusting)\n"
+            "CLAIM_NUMBER: (labeled 'Claim #', 'Claim No.', 'File #', or similar)\n"
+            "POLICY_NUMBER: (labeled 'Policy #', 'Policy No.', or similar)\n"
+            "LOSS_DATE: (labeled 'Date of Loss' or 'Loss Date' — MM/DD/YYYY)\n"
+            "LOSS_ADDRESS: (the property address related to this claim)\n"
+            "BANK: (the bank this check is drawn on — usually bottom-left of check face)\n"
+            "MEMO: (the full memo line exactly as printed — do not summarize)\n\n"
+            "If a field is not visible, leave it blank after the colon. Do not guess. "
+            "No explanation. "
+            "If check says 'John Smith and ABC Mortgage': PAYEE=John Smith, CO_PAYEE=ABC Mortgage."
         ),
     })
 
@@ -162,7 +176,7 @@ def extract_fields(images: List[Image.Image]) -> dict:
         try:
             response = client.messages.create(
                 model="claude-sonnet-4-6",
-                max_tokens=256,
+                max_tokens=512,
                 messages=[{"role": "user", "content": image_blocks}],
             )
             return _parse_response(response.content[0].text.strip())
@@ -177,7 +191,12 @@ def extract_fields(images: List[Image.Image]) -> dict:
 
 def _parse_response(text: str) -> dict:
     """Parse Claude's structured response into a dict."""
-    fields = {"date": "", "check_number": "", "amount": "", "coverage": "", "carrier": ""}
+    fields = {
+        "date": "", "check_number": "", "amount": "", "coverage": "", "carrier": "",
+        "payees": "", "client": "", "mortgage_co": "", "vendor": "",
+        "insured_name": "", "claim_number": "",
+        "policy_number": "", "loss_date": "", "loss_address": "", "bank": "", "memo": "",
+    }
 
     for line in text.splitlines():
         line = line.strip()
@@ -196,6 +215,28 @@ def _parse_response(text: str) -> dict:
             fields["carrier"] = line.split(":", 1)[1].strip()
         elif line.startswith("COVERAGE:"):
             fields["coverage"] = line.split(":", 1)[1].strip()
+        elif line.startswith("PAYEES:"):
+            fields["payees"] = line.split(":", 1)[1].strip()
+        elif line.startswith("CLIENT:"):
+            fields["client"] = line.split(":", 1)[1].strip()
+        elif line.startswith("MORTGAGE_CO:"):
+            fields["mortgage_co"] = line.split(":", 1)[1].strip()
+        elif line.startswith("VENDOR:"):
+            fields["vendor"] = line.split(":", 1)[1].strip()
+        elif line.startswith("INSURED_NAME:"):
+            fields["insured_name"] = line.split(":", 1)[1].strip()
+        elif line.startswith("CLAIM_NUMBER:"):
+            fields["claim_number"] = line.split(":", 1)[1].strip()
+        elif line.startswith("POLICY_NUMBER:"):
+            fields["policy_number"] = line.split(":", 1)[1].strip()
+        elif line.startswith("LOSS_DATE:"):
+            fields["loss_date"] = line.split(":", 1)[1].strip()
+        elif line.startswith("LOSS_ADDRESS:"):
+            fields["loss_address"] = line.split(":", 1)[1].strip()
+        elif line.startswith("BANK:"):
+            fields["bank"] = line.split(":", 1)[1].strip()
+        elif line.startswith("MEMO:"):
+            fields["memo"] = line.split(":", 1)[1].strip()
 
     return fields
 

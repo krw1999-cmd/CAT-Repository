@@ -13,9 +13,11 @@ Scan order expected: [optional letter pages] [check front] [check back] [repeat]
 import re
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 from config import WATCH_FOLDER
+from db import init_db, insert_check
 from ocr import extract_fields, find_check_fronts
 from pdf_utils import load_batch, save_merged_pdf
 
@@ -23,6 +25,7 @@ WATCH_PATH = Path(WATCH_FOLDER)
 RAW_DIR = WATCH_PATH / "_raw"
 
 _processed: set = set()
+_db_conn = None
 
 RENAMED_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2} check#", re.IGNORECASE)
 
@@ -44,7 +47,7 @@ def _prompt_field(label: str) -> str:
 
 
 def _process_group(
-    reader, all_images: list, group: dict, check_index: int, total: int
+    reader, all_images: list, group: dict, check_index: int, total: int, conn=None
 ) -> None:
     print()
     print("─" * 45)
@@ -62,7 +65,12 @@ def _process_group(
         fields = extract_fields(check_images)
     except Exception as e:
         print(f"  ERROR in extract_fields: {e}")
-        fields = {"date": "", "check_number": "", "amount": "", "coverage": "", "carrier": ""}
+        fields = {
+            "date": "", "check_number": "", "amount": "", "coverage": "", "carrier": "",
+            "payees": "", "client": "", "mortgage_co": "", "vendor": "",
+            "insured_name": "", "claim_number": "",
+            "policy_number": "", "loss_date": "", "loss_address": "", "bank": "", "memo": "",
+        }
 
     date = fields["date"]
     check_number = fields["check_number"]
@@ -70,8 +78,9 @@ def _process_group(
     amount = fields["amount"]
     carrier = fields.get("carrier", "")
 
-    # Only prompt for fields Claude couldn't fill
-    missing = [k for k, v in fields.items() if not v and k != "carrier"]
+    # Only prompt for the 4 filename fields Claude couldn't fill
+    filename_fields = {"date", "check_number", "coverage", "amount"}
+    missing = [k for k in filename_fields if not fields.get(k)]
     if missing:
         print(f"  Could not extract: {', '.join(missing)}")
         if not date:
@@ -90,6 +99,29 @@ def _process_group(
     dest = WATCH_PATH / filename
     save_merged_pdf(reader, group["page_indices"], dest)
     _processed.add(dest)
+
+    if conn is not None:
+        record = {
+            "file_name": filename,
+            "check_date": date,
+            "check_number": check_number,
+            "coverage": coverage,
+            "amount": amount,
+            "payees": fields.get("payees", ""),
+            "client": fields.get("client", ""),
+            "mortgage_co": fields.get("mortgage_co", ""),
+            "vendor": fields.get("vendor", ""),
+            "insured_name": fields.get("insured_name", ""),
+            "claim_number": fields.get("claim_number", ""),
+            "policy_number": fields.get("policy_number", ""),
+            "loss_date": fields.get("loss_date", ""),
+            "loss_address": fields.get("loss_address", ""),
+            "bank": fields.get("bank", ""),
+            "memo": fields.get("memo", ""),
+            "processed_at": datetime.now(timezone.utc).isoformat(),
+        }
+        insert_check(conn, record)
+        print(f"  ✓ Saved to checks.db")
 
 
 def process_batch(pdf_path: Path) -> None:
@@ -131,7 +163,7 @@ def process_batch(pdf_path: Path) -> None:
 
     for i, group in enumerate(groups, start=1):
         try:
-            _process_group(reader, all_images, group, i, total)
+            _process_group(reader, all_images, group, i, total, conn=_db_conn)
         except KeyboardInterrupt:
             print("\n  Interrupted.")
             break
@@ -169,12 +201,15 @@ def _scan_and_process() -> None:
 
 
 def main():
+    global _db_conn
+
     if not WATCH_PATH.exists():
         print(f"Error: WATCH_FOLDER does not exist: {WATCH_FOLDER}")
         print("Update WATCH_FOLDER in config.py and try again.")
         sys.exit(1)
 
     RAW_DIR.mkdir(exist_ok=True)
+    _db_conn = init_db(WATCH_FOLDER)
 
     print("check_processor ready.")
     print(f"Watching: {WATCH_FOLDER}")
