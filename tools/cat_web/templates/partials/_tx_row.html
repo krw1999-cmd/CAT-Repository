@@ -37,6 +37,10 @@
     {% elif is_released %}
       {% if tx.all_disburse_received %}
         <span id="tx-status-{{ tx.id }}" class="status-badge status-released">Released</span>
+      {% elif tx.all_client_rcvd %}
+        <span id="tx-status-{{ tx.id }}" class="status-badge status-fee-pending">Fee Pending</span>
+      {% elif tx.all_fee_rcvd %}
+        <span id="tx-status-{{ tx.id }}" class="status-badge status-client-pending">Client Pending</span>
       {% else %}
         <span id="tx-status-{{ tx.id }}" class="status-badge status-inv-pending">Pending</span>
       {% endif %}

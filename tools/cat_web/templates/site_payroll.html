@@ -1,0 +1,423 @@
+{% extends "base.html" %}
+{% block title %}Payroll{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h2>Payroll</h2>
+  <a href="{{ url_for('site_payroll_export', date_from=date_from, date_to=date_to) }}"
+     class="btn btn-ghost btn-sm">⬇ Export CSV</a>
+</div>
+
+{# ── Date filter (server-side) ─────────────────────────────────────────────── #}
+<form method="get" action="{{ url_for('site_payroll') }}" style="display:flex; gap:8px; align-items:center; margin-bottom:20px; flex-wrap:wrap">
+  <label class="text-muted text-small">Date range:</label>
+  <input type="date" name="date_from" value="{{ date_from }}" class="input-sm" style="width:140px">
+  <span class="text-muted">to</span>
+  <input type="date" name="date_to" value="{{ date_to }}" class="input-sm" style="width:140px">
+  <button type="submit" class="btn btn-primary btn-sm">Filter</button>
+</form>
+
+{# ── Client-side filters ───────────────────────────────────────────────────── #}
+<div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:20px">
+  <label class="text-muted text-small">Show:</label>
+  <select id="filter-section" class="input-sm select-sm" onchange="applyFilters()">
+    <option value="all">All Sections</option>
+    <option value="received">Received</option>
+    <option value="pending">Pending</option>
+    <option value="expenses">Expenses</option>
+  </select>
+  <select id="filter-paid" class="input-sm select-sm" onchange="applyFilters()">
+    <option value="all">All Paid Status</option>
+    <option value="unpaid">Unpaid</option>
+    <option value="partial">Partial</option>
+    <option value="paid">Paid</option>
+  </select>
+  <select id="filter-person" class="input-sm select-sm" onchange="applyFilters()">
+    <option value="all">All People</option>
+    {% for p in payroll.payees %}
+    <option value="{{ p.name }}">{{ p.name }}</option>
+    {% endfor %}
+  </select>
+  <input type="text" id="filter-claim" class="input-sm" placeholder="Search claim…" oninput="applyFilters()" style="width:160px">
+</div>
+
+{# ── Bulk pay form wraps all cards ─────────────────────────────────────────── #}
+<form id="bulk-pay-form" method="post" action="{{ url_for('site_payroll_mark_paid_bulk') }}">
+  <input type="hidden" name="date_from" value="{{ date_from }}">
+  <input type="hidden" name="date_to"   value="{{ date_to }}">
+
+  {% if not payroll.payees %}
+  <p class="text-muted text-small" style="margin-top:20px">No payroll data found for this date range.</p>
+  {% endif %}
+
+  {% for payee in payroll.payees %}
+  {% set fee_remaining = payee.total_earned - payee.total_paid %}
+  {% set exp_outstanding = payee.total_exp_owed - payee.total_exp_paid %}
+  {% set net_earned = payee.total_earned - payee.total_exp_owed %}
+  {% set net_paid = payee.total_paid - payee.total_exp_paid %}
+  {% set net_owed = fee_remaining - exp_outstanding %}
+  <div class="payroll-card" data-person="{{ payee.name }}">
+
+    {# Card header — name + summary #}
+    <div class="payroll-card-header">
+      <div class="payroll-card-name">{{ payee.name or '(unnamed)' }}</div>
+      <div class="payroll-card-summary">
+        <span>Fees: Earned <strong>{{ payee.total_earned | money }}</strong> | Paid <strong>{{ payee.total_paid | money }}</strong> | Remaining <strong {% if fee_remaining > 0.005 %}style="color:var(--red)"{% endif %}>{{ fee_remaining | money }}</strong></span>
+        {% if payee.total_deferred > 0 %}
+        <span style="margin-left:16px">Pending: <strong>{{ payee.total_deferred | money }}</strong></span>
+        {% endif %}
+        {% if payee.exp_rows %}
+        <span style="margin-left:16px">Expenses: Owed <strong>{{ payee.total_exp_owed | money }}</strong> | Paid back <strong>{{ payee.total_exp_paid | money }}</strong> | Outstanding <strong {% if exp_outstanding > 0.005 %}style="color:var(--red)"{% endif %}>{{ exp_outstanding | money }}</strong></span>
+        {% endif %}
+        <span class="payroll-net-summary">Net: Earned <strong>{{ net_earned | money }}</strong> | Paid <strong>{{ net_paid | money }}</strong> | Owed <strong {% if net_owed > 0.005 %}style="color:var(--red)"{% elif net_owed < -0.005 %}style="color:var(--green)"{% endif %}>{{ net_owed | money }}</strong></span>
+      </div>
+    </div>
+
+    {# ── Received subsection ─── #}
+    {% if payee.rows %}
+    <div class="payroll-subsection" data-section="received">
+      <div class="payroll-subsection-label">Received</div>
+      <div class="table-wrap" style="margin:0; border:none; box-shadow:none; border-radius:0">
+        <table class="table table-compact">
+          <thead>
+            <tr>
+              <th style="width:28px"><input type="checkbox" class="card-check-all" onchange="toggleCardChecks(this, 'received')" title="Select all"></th>
+              <th>Job #</th>
+              <th>Insured</th>
+              <th>Check #</th>
+              <th>Date</th>
+              <th>Type</th>
+              <th>Role</th>
+              <th class="num">Split %</th>
+              <th class="num">Earned</th>
+              <th>Paid?</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in payee.rows %}
+            <tr class="payroll-row" id="split-row-{{ row.split_id }}"
+                data-status="{{ row.status }}"
+                data-claim="{{ row.job_number }} {{ row.insured_name }}">
+              <td>
+                {% if row.status != 'paid' %}
+                <input type="checkbox" name="split_ids[]" value="{{ row.split_id }}" class="row-check">
+                {% endif %}
+              </td>
+              <td><a href="{{ url_for('claim_detail', claim_id=row.claim_id) }}" class="text-muted">{{ row.job_number or '—' }}</a></td>
+              <td>{{ row.insured_name or '—' }}</td>
+              <td><a href="{{ url_for('tx_detail', claim_id=row.claim_id, tx_id=row.tx_id) }}" class="text-muted">{{ row.check_number or '—' }}</a></td>
+              <td>{{ row.date or '—' }}</td>
+              <td>{{ row.type }}</td>
+              <td class="capitalize">{{ row.role }}</td>
+              <td class="num">{{ "%.2f"|format(row.split_pct or 0) }}%</td>
+              <td class="num"><strong>{{ row.earned | money }}</strong></td>
+              <td>
+                <span id="split-status-{{ row.split_id }}">
+                  {% if row.status == 'paid' %}
+                  <button type="button" class="status-badge status-released payroll-unmark-btn"
+                          hx-post="{{ url_for('site_split_toggle_paid', sid=row.split_id) }}"
+                          hx-vals='{"paid_date": ""}'
+                          hx-target="#split-status-{{ row.split_id }}"
+                          hx-swap="outerHTML"
+                          title="Click to unmark paid">✓ {{ row.payroll_paid_date or 'Paid' }}</button>
+                  {% elif row.status == 'partial' %}
+                  <span class="status-badge status-inv-pending">Partial {{ row.payroll_paid | money }}</span>
+                  {% else %}
+                  <button type="button" class="btn-icon"
+                          hx-post="{{ url_for('site_split_toggle_paid', sid=row.split_id) }}"
+                          hx-vals='{"paid_date": ""}'
+                          hx-target="#split-status-{{ row.split_id }}"
+                          hx-swap="outerHTML"
+                          title="Mark paid today">✓</button>
+                  {% endif %}
+                </span>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="payroll-subsection-footer">
+        <label>Pay date: <input type="date" class="input-sm card-pay-date" value="{{ date_to }}" style="width:140px"></label>
+        <button type="button" class="btn btn-primary btn-sm" onclick="markSectionPaid(this, 'received')">Mark Selected Paid</button>
+      </div>
+    </div>
+    {% endif %}
+
+    {# ── Pending subsection ─── #}
+    {% if payee.pending_rows %}
+    <div class="payroll-subsection" data-section="pending">
+      <div class="payroll-subsection-label">Pending</div>
+      <div class="table-wrap" style="margin:0; border:none; box-shadow:none; border-radius:0">
+        <table class="table table-compact">
+          <thead>
+            <tr>
+              <th>Job #</th>
+              <th>Insured</th>
+              <th>Check #</th>
+              <th>Date</th>
+              <th>Type</th>
+              <th>Role</th>
+              <th class="num">Split %</th>
+              <th class="num">Amount</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in payee.pending_rows %}
+            <tr class="payroll-row" data-status="n/a"
+                data-claim="{{ row.job_number }} {{ row.insured_name }}">
+              <td><a href="{{ url_for('claim_detail', claim_id=row.claim_id) }}" class="text-muted">{{ row.job_number or '—' }}</a></td>
+              <td>{{ row.insured_name or '—' }}</td>
+              <td><a href="{{ url_for('tx_detail', claim_id=row.claim_id, tx_id=row.tx_id) }}" class="text-muted">{{ row.check_number or '—' }}</a></td>
+              <td>{{ row.date or '—' }}</td>
+              <td>{{ row.type }}</td>
+              <td class="capitalize">{{ row.role }}</td>
+              <td class="num">{{ "%.2f"|format(row.split_pct or 0) }}%</td>
+              <td class="num">{{ row.deferred | money }}</td>
+              <td>
+                {% if row.pending_type == 'not_received' %}
+                <span class="status-badge status-inv-pending">Fee not received</span>
+                {% elif row.invoice_info %}
+                <span class="status-badge status-inv-pending" title="Invoice outstanding">
+                  Deferred — #{{ row.invoice_info.invoice_number }}
+                  ({{ row.invoice_info.outstanding | money }} {{ row.invoice_info.status }})
+                </span>
+                {% else %}
+                <span class="text-muted">Deferred</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
+
+    {# ── Expenses subsection ─── #}
+    {% if payee.exp_rows %}
+    <div class="payroll-subsection" data-section="expenses">
+      <div class="payroll-subsection-label">Expenses</div>
+      <div class="table-wrap" style="margin:0; border:none; box-shadow:none; border-radius:0">
+        <table class="table table-compact">
+          <thead>
+            <tr>
+              <th style="width:28px"><input type="checkbox" class="card-check-all" onchange="toggleCardChecks(this, 'expenses')" title="Select all"></th>
+              <th>Job #</th>
+              <th>Insured</th>
+              <th>Date</th>
+              <th>Vendor</th>
+              <th>Role</th>
+              <th class="num">Split %</th>
+              <th class="num">Owed</th>
+              <th>Paid?</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in payee.exp_rows %}
+            <tr class="payroll-row" id="exp-split-row-{{ row.exp_split_id }}"
+                data-status="{{ row.status }}"
+                data-claim="{{ row.job_number }} {{ row.insured_name }}">
+              <td>
+                {% if row.status != 'paid' %}
+                <input type="checkbox" name="exp_split_ids[]" value="{{ row.exp_split_id }}" class="row-check exp-check">
+                {% endif %}
+              </td>
+              <td><a href="{{ url_for('claim_detail', claim_id=row.claim_id) }}" class="text-muted">{{ row.job_number or '—' }}</a></td>
+              <td>{{ row.insured_name or '—' }}</td>
+              <td>{{ row.date or '—' }}</td>
+              <td>{{ row.vendor or '—' }}</td>
+              <td class="capitalize">{{ row.role }}</td>
+              <td class="num">{{ "%.2f"|format(row.split_pct or 0) }}%</td>
+              <td class="num"><strong>{{ row.owed | money }}</strong></td>
+              <td>
+                <span id="exp-split-status-{{ row.exp_split_id }}">
+                  {% if row.status == 'paid' %}
+                  <button type="button" class="status-badge status-released payroll-unmark-btn"
+                          hx-post="{{ url_for('site_expense_split_toggle_paid', sid=row.exp_split_id) }}"
+                          hx-vals='{"paid_date": ""}'
+                          hx-target="#exp-split-status-{{ row.exp_split_id }}"
+                          hx-swap="outerHTML"
+                          title="Click to unmark paid">✓ {{ row.payroll_paid_date or 'Paid' }}</button>
+                  {% elif row.status == 'partial' %}
+                  <span class="status-badge status-inv-pending">Partial {{ row.payroll_paid | money }}</span>
+                  {% else %}
+                  <button type="button" class="btn-icon"
+                          hx-post="{{ url_for('site_expense_split_toggle_paid', sid=row.exp_split_id) }}"
+                          hx-vals='{"paid_date": ""}'
+                          hx-target="#exp-split-status-{{ row.exp_split_id }}"
+                          hx-swap="outerHTML"
+                          title="Click to unmark paid">✓</button>
+                  {% endif %}
+                </span>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="payroll-subsection-footer">
+        <label>Pay date: <input type="date" class="input-sm card-pay-date" value="{{ date_to }}" style="width:140px"></label>
+        <button type="button" class="btn btn-primary btn-sm" onclick="markSectionPaid(this, 'expenses')">Mark Selected Paid</button>
+      </div>
+    </div>
+    {% endif %}
+
+  </div>{# end payroll-card #}
+  {% endfor %}
+
+</form>{# end bulk-pay-form #}
+
+<style>
+.payroll-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  margin-top: 16px;
+  overflow: hidden;
+}
+.payroll-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  background: #f8fafc;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.payroll-card-name { font-weight: 700; font-size: 15px; }
+.payroll-card-summary {
+  font-size: 13px;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.payroll-net-summary {
+  margin-left: 16px;
+  padding-left: 16px;
+  border-left: 2px solid var(--border);
+  color: var(--text);
+  font-weight: 600;
+}
+.payroll-subsection { border-top: 1px solid var(--border); }
+.payroll-subsection-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  color: var(--muted);
+  padding: 6px 12px 4px;
+  background: #fafafa;
+}
+button.payroll-unmark-btn {
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  opacity: 0.85;
+}
+button.payroll-unmark-btn:hover { opacity: 1; text-decoration: line-through; }
+.payroll-subsection-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: #f8fafc;
+  border-top: 1px solid var(--border);
+}
+</style>
+
+<script>
+function applyFilters() {
+  const section = document.getElementById('filter-section').value;
+  const paid    = document.getElementById('filter-paid').value;
+  const person  = document.getElementById('filter-person').value;
+  const claim   = document.getElementById('filter-claim').value.toLowerCase();
+
+  document.querySelectorAll('.payroll-card').forEach(card => {
+    const cardPerson = card.dataset.person;
+    if (person !== 'all' && cardPerson !== person) {
+      card.style.display = 'none';
+      return;
+    }
+    card.style.display = '';
+
+    let cardHasVisible = false;
+
+    card.querySelectorAll('.payroll-subsection').forEach(sub => {
+      const subSection = sub.dataset.section;
+      if (section !== 'all' && subSection !== section) {
+        sub.style.display = 'none';
+        return;
+      }
+      sub.style.display = '';
+
+      let subHasVisible = false;
+      sub.querySelectorAll('.payroll-row').forEach(row => {
+        const rowStatus = row.dataset.status;
+        const rowClaim  = (row.dataset.claim || '').toLowerCase();
+        let show = true;
+        if (paid !== 'all' && rowStatus !== paid) show = false;
+        if (claim && !rowClaim.includes(claim)) show = false;
+        row.style.display = show ? '' : 'none';
+        if (show) subHasVisible = true;
+      });
+      if (!subHasVisible) sub.style.display = 'none';
+      else cardHasVisible = true;
+    });
+
+    if (!cardHasVisible && (section !== 'all' || paid !== 'all' || claim)) {
+      card.style.display = 'none';
+    }
+  });
+}
+
+function toggleCardChecks(headerCheckbox, sectionType) {
+  const sub = headerCheckbox.closest('.payroll-subsection');
+  const selector = sectionType === 'expenses' ? '.exp-check' : '.row-check:not(.exp-check)';
+  sub.querySelectorAll(selector).forEach(c => { c.checked = headerCheckbox.checked; });
+}
+
+function markSectionPaid(btn, sectionType) {
+  const sub = btn.closest('.payroll-subsection');
+  const card = btn.closest('.payroll-card');
+  const payDateInput = card.querySelector('.card-pay-date');
+  const payDate = (payDateInput && payDateInput.value) || new Date().toISOString().slice(0,10);
+
+  const splitInputs = sectionType === 'received'
+    ? sub.querySelectorAll('input[name="split_ids[]"]:checked')
+    : [];
+  const expInputs = sectionType === 'expenses'
+    ? sub.querySelectorAll('input[name="exp_split_ids[]"]:checked')
+    : [];
+
+  if (!splitInputs.length && !expInputs.length) {
+    alert('Select at least one row to mark paid.');
+    return;
+  }
+
+  const tempForm = document.createElement('form');
+  tempForm.method = 'POST';
+  tempForm.action = document.getElementById('bulk-pay-form').action;
+  tempForm.style.display = 'none';
+
+  function addHidden(name, val) {
+    const inp = document.createElement('input');
+    inp.type = 'hidden'; inp.name = name; inp.value = val;
+    tempForm.appendChild(inp);
+  }
+
+  addHidden('paid_date', payDate);
+  addHidden('date_from', '{{ date_from }}');
+  addHidden('date_to',   '{{ date_to }}');
+  Array.from(splitInputs).forEach(i => addHidden('split_ids[]', i.value));
+  Array.from(expInputs).forEach(i => addHidden('exp_split_ids[]', i.value));
+
+  document.body.appendChild(tempForm);
+  tempForm.submit();
+}
+</script>
+{% endblock %}

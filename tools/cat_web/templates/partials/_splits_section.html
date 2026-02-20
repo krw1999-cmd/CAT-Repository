@@ -7,6 +7,12 @@
       Fee: <strong id="split-total-fee">{{ (splits|sum(attribute='fee_amount')) | money }}</strong>
     </span>
   </div>
+  {% if (disburse_totals.fee_deferred or 0) > 0 %}
+  <div class="deferred-splits-banner">
+    ⚠ Fee is deferred — splits are recorded but <strong>will not be distributed until the fee is recouped</strong> via a Fee Invoice or check payment.
+    <span class="text-small" style="margin-left:6px; opacity:.8">(Deferred: {{ disburse_totals.fee_deferred | money }})</span>
+  </div>
+  {% endif %}
   <div class="table-wrap">
     <table class="table table-compact">
       <thead>

@@ -1,0 +1,36 @@
+<div class="card" style="margin-top:12px">
+  <div class="section-header" style="margin-bottom:10px">
+    <h3>Historic Payee Data</h3>
+    <span class="text-muted text-small">Date ranges derived from transaction splits on this claim.</span>
+  </div>
+  {% if historic %}
+  <div class="table-wrap">
+    <table class="table table-compact">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Role</th>
+          <th class="num">Split %</th>
+          <th>Active From</th>
+          <th>Active To</th>
+          <th class="num">Tx Count</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for h in historic %}
+        <tr>
+          <td>{{ h.name }}</td>
+          <td class="capitalize">{{ h.role }}</td>
+          <td class="num">{{ "%.2f"|format(h.split_pct or 0) }}%</td>
+          <td>{{ h.active_from or '—' }}</td>
+          <td>{{ h.active_to or '—' }}</td>
+          <td class="num">{{ h.tx_count }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="text-muted text-small">No split history found for this claim.</p>
+  {% endif %}
+</div>

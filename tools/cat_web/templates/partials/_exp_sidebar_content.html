@@ -1,8 +1,11 @@
-{# ── Sidebar card OOB ─────────────────────────────────────────────────────────
-   Block element OOB — mirrors _summary.html pattern. Replaces the entire sidebar
-   card so conditional sections and class-bound colors all re-render correctly.
-──────────────────────────────────────────────────────────────────────────── #}
-<div class="card" id="exp-totals-sidebar" hx-swap-oob="true">
+{#
+  Expense sidebar card content — returned as the PRIMARY response body from
+  exp_sidebar_fragment. The sidebar div itself is swapped via hx-swap="outerHTML"
+  on the sidebar div element. Section header spans are OOB-swapped here because
+  this response contains NO <tr> elements, so the HTML parser keeps everything
+  in body context and HTMX OOB works reliably.
+#}
+<div class="card" id="exp-totals-sidebar">
 
   <div class="sidebar-label">Invoice Amount</div>
   <div class="sidebar-value">{{ (expense.invoice_amount or 0) | money }}</div>
@@ -73,9 +76,10 @@
 
 </div>
 
-{# ── Section header totals OOB ────────────────────────────────────────────────
-   Targeted by ID on the <span> wrappers in expense.html section headers.
-──────────────────────────────────────────────────────────────────────────── #}
+{#
+  Section header OOB — safe here because no <tr> precedes them in this response.
+  The HTML parser keeps these in body context, so HTMX OOB works.
+#}
 <span class="text-muted text-small" id="exp-pay-header-totals" hx-swap-oob="outerHTML">
   WP: <strong>{{ totals.wp_paid | money }}</strong>
   &nbsp;·&nbsp;

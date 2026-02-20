@@ -2,9 +2,15 @@ from __future__ import annotations
 
 """CAT Web — Flask application entry point and route definitions."""
 
+import csv
+import io
+from datetime import date, timedelta
+
 from flask import (
     Flask,
+    Response,
     g,
+    make_response,
     redirect,
     render_template,
     request,
@@ -107,6 +113,7 @@ def claim_detail(claim_id: int):
     assignees = db_module.get_assignees(claim_id)
     summary = db_module.get_transaction_summary(claim_id)
     open_escrows = db_module.get_open_escrows(claim_id)
+    coverage_pivot = db_module.get_coverage_pivot(claim_id)
     return render_template(
         "claim.html",
         claim=claim,
@@ -116,6 +123,7 @@ def claim_detail(claim_id: int):
         assignees=assignees,
         summary=summary,
         open_escrows=open_escrows,
+        coverage_pivot=coverage_pivot,
         tx_types=TRANSACTION_TYPES,
         coverage_types=db_module.get_coverage_types(),
     )
@@ -418,20 +426,33 @@ def expense_detail(claim_id: int, exp_id: int):
     expense = db_module.get_expense(exp_id)
     if not claim or not expense:
         abort(404)
-    payments       = db_module.get_expense_payments(exp_id)
-    reimbursements = db_module.get_expense_reimbursements(exp_id)
-    splits         = db_module.get_expense_splits(exp_id)
-    totals         = db_module.get_expense_totals(exp_id)
-    claim_txs      = db_module.get_claim_transactions_for_select(claim_id)
-    vendors        = db_module.get_all_vendors()
+    payments           = db_module.get_expense_payments(exp_id)
+    reimbursements     = db_module.get_expense_reimbursements(exp_id)
+    wp_reimbursements  = db_module.get_wp_reimbursements(exp_id)
+    splits             = db_module.get_expense_splits(exp_id)
+    totals             = db_module.get_expense_totals(exp_id)
+    claim_txs          = db_module.get_claim_transactions_for_select(claim_id)
+    vendors            = db_module.get_all_vendors()
     return render_template(
         "expense.html",
         claim=claim, expense=expense,
         payments=payments, reimbursements=reimbursements,
+        wp_reimbursements=wp_reimbursements,
         splits=splits, totals=totals,
         claim_txs_for_select=claim_txs,
         vendors=vendors,
     )
+
+
+# Sidebar fragment — triggered via HX-Trigger: expTotalsUpdated from mutation routes
+
+@app.route("/claims/<int:claim_id>/expenses/<int:exp_id>/sidebar")
+@login_required
+def exp_sidebar_fragment(claim_id: int, exp_id: int):
+    expense = db_module.get_expense(exp_id)
+    totals  = db_module.get_expense_totals(exp_id)
+    return render_template("partials/_exp_sidebar_content.html",
+                           expense=expense, totals=totals)
 
 
 # Expense info card — view / edit / save
@@ -492,11 +513,11 @@ def exp_pay_create(claim_id: int, exp_id: int):
     claim   = db_module.get_claim(claim_id)
     expense = db_module.get_expense(exp_id)
     p       = _row_from_list(db_module.get_expense_payments(exp_id), pid)
-    totals  = db_module.get_expense_totals(exp_id)
-    row_html = render_template("partials/_exp_pay_row.html", claim=claim, expense=expense, p=p)
+    row_html    = render_template("partials/_exp_pay_row.html", claim=claim, expense=expense, p=p)
     placeholder = '<tr id="exp-pay-new-row-placeholder"></tr>'
-    sidebar_html = render_template("partials/_exp_totals_oob.html", expense=expense, totals=totals)
-    return row_html + placeholder + sidebar_html
+    resp = make_response(row_html + placeholder)
+    resp.headers["HX-Trigger"] = "expTotalsUpdated"
+    return resp
 
 
 @app.route("/claims/<int:claim_id>/expenses/<int:exp_id>/payments/<int:pid>/edit")
@@ -532,20 +553,19 @@ def exp_pay_update(claim_id: int, exp_id: int, pid: int):
     claim   = db_module.get_claim(claim_id)
     expense = db_module.get_expense(exp_id)
     p       = _row_from_list(db_module.get_expense_payments(exp_id), pid)
-    totals  = db_module.get_expense_totals(exp_id)
-    row_html    = render_template("partials/_exp_pay_row.html", claim=claim, expense=expense, p=p)
-    sidebar_html = render_template("partials/_exp_totals_oob.html", expense=expense, totals=totals)
-    return row_html + sidebar_html
+    row_html = render_template("partials/_exp_pay_row.html", claim=claim, expense=expense, p=p)
+    resp = make_response(row_html)
+    resp.headers["HX-Trigger"] = "expTotalsUpdated"
+    return resp
 
 
 @app.route("/claims/<int:claim_id>/expenses/<int:exp_id>/payments/<int:pid>", methods=["DELETE"])
 @login_required
 def exp_pay_delete(claim_id: int, exp_id: int, pid: int):
     db_module.delete_expense_payment(pid)
-    claim   = db_module.get_claim(claim_id)
-    expense = db_module.get_expense(exp_id)
-    totals  = db_module.get_expense_totals(exp_id)
-    return render_template("partials/_exp_totals_oob.html", expense=expense, totals=totals)
+    resp = make_response("")
+    resp.headers["HX-Trigger"] = "expTotalsUpdated"
+    return resp
 
 
 # Expense reimbursements
@@ -576,21 +596,63 @@ def exp_reimb_create(claim_id: int, exp_id: int):
     claim   = db_module.get_claim(claim_id)
     expense = db_module.get_expense(exp_id)
     r       = _row_from_list(db_module.get_expense_reimbursements(exp_id), rid)
-    totals  = db_module.get_expense_totals(exp_id)
-    row_html = render_template("partials/_exp_reimb_row.html", claim=claim, expense=expense, r=r)
+    row_html    = render_template("partials/_exp_reimb_row.html", claim=claim, expense=expense, r=r)
     placeholder = '<tr id="exp-reimb-new-row-placeholder"></tr>'
-    sidebar_html = render_template("partials/_exp_totals_oob.html", expense=expense, totals=totals)
-    return row_html + placeholder + sidebar_html
+    resp = make_response(row_html + placeholder)
+    resp.headers["HX-Trigger"] = "expTotalsUpdated"
+    return resp
 
 
 @app.route("/claims/<int:claim_id>/expenses/<int:exp_id>/reimbursements/<int:rid>", methods=["DELETE"])
 @login_required
 def exp_reimb_delete(claim_id: int, exp_id: int, rid: int):
     db_module.delete_expense_reimbursement(rid)
+    resp = make_response("")
+    resp.headers["HX-Trigger"] = "expTotalsUpdated"
+    return resp
+
+
+# Expense WP reimbursements (WP paying client back)
+
+@app.route("/claims/<int:claim_id>/expenses/<int:exp_id>/wp-reimbursements/new-row")
+@login_required
+def exp_wp_reimb_new_row(claim_id: int, exp_id: int):
     claim   = db_module.get_claim(claim_id)
     expense = db_module.get_expense(exp_id)
-    totals  = db_module.get_expense_totals(exp_id)
-    return render_template("partials/_exp_totals_oob.html", expense=expense, totals=totals)
+    claim_txs = db_module.get_claim_transactions_for_select(claim_id)
+    return render_template("partials/_exp_wp_reimb_edit.html",
+                           claim=claim, expense=expense, r=None,
+                           claim_txs_for_select=claim_txs)
+
+
+@app.route("/claims/<int:claim_id>/expenses/<int:exp_id>/wp-reimbursements", methods=["POST"])
+@login_required
+def exp_wp_reimb_create(claim_id: int, exp_id: int):
+    data = {
+        "date":      request.form.get("date", "").strip(),
+        "amount":    db_module._f(request.form.get("amount")),
+        "method":    request.form.get("method", "").strip(),
+        "reference": request.form.get("reference", "").strip(),
+        "notes":     request.form.get("notes", "").strip(),
+    }
+    rid     = db_module.create_wp_reimbursement(exp_id, data)
+    claim   = db_module.get_claim(claim_id)
+    expense = db_module.get_expense(exp_id)
+    r       = _row_from_list(db_module.get_wp_reimbursements(exp_id), rid)
+    row_html    = render_template("partials/_exp_wp_reimb_row.html", claim=claim, expense=expense, r=r)
+    placeholder = '<tr id="exp-wp-reimb-new-row-placeholder"></tr>'
+    resp = make_response(row_html + placeholder)
+    resp.headers["HX-Trigger"] = "expTotalsUpdated"
+    return resp
+
+
+@app.route("/claims/<int:claim_id>/expenses/<int:exp_id>/wp-reimbursements/<int:rid>", methods=["DELETE"])
+@login_required
+def exp_wp_reimb_delete(claim_id: int, exp_id: int, rid: int):
+    db_module.delete_wp_reimbursement(rid)
+    resp = make_response("")
+    resp.headers["HX-Trigger"] = "expTotalsUpdated"
+    return resp
 
 
 # Expense splits
@@ -879,6 +941,7 @@ def tx_detail(claim_id: int, tx_id: int):
         invoice_deferred_links = db_module.get_invoice_deferred_links(tx_id)
         claim_txs_for_select = db_module.get_claim_transactions_for_select(claim_id, exclude_tx_id=tx_id)
 
+    tx_status = _tx_display_status(disbursements)
     return render_template(
         "transaction.html",
         claim=claim,
@@ -897,6 +960,9 @@ def tx_detail(claim_id: int, tx_id: int):
         roles=ASSIGNEE_ROLES,
         coverage_types=db_module.get_coverage_types(),
         tx_types=TRANSACTION_TYPES,
+        tx_status=tx_status,
+        tx_status_css=_TX_STATUS_CSS[tx_status],
+        tx_status_label=_TX_STATUS_LABEL[tx_status],
     )
 
 
@@ -2013,12 +2079,46 @@ def _check_row_status_oob(tx_id: int, tx: dict) -> str:
             f'class="status-badge {css}">{label}</span>')
 
 
+def _tx_display_status(disbursements: list) -> str:
+    """Return 'released', 'fee_pending', 'client_pending', or 'pending' for a tx."""
+    if not disbursements:
+        return "pending"
+    all_client = all(d.get("client_received") for d in disbursements)
+    fee_disburse = [d for d in disbursements
+                    if d.get("fee_applies")
+                    and (d.get("fee_owed") or 0) - (d.get("fee_deferred") or 0) > 0.005]
+    all_fee = len(fee_disburse) == 0 or all(
+        (d.get("fee_collected") or 0) >= (d.get("fee_owed") or 0) for d in fee_disburse
+    )
+    if all_client and all_fee:
+        return "released"
+    elif all_client:
+        return "fee_pending"
+    elif all_fee:
+        return "client_pending"
+    return "pending"
+
+
+_TX_STATUS_CSS = {
+    "released":       "status-released",
+    "fee_pending":    "status-fee-pending",
+    "client_pending": "status-client-pending",
+    "pending":        "status-inv-pending",
+}
+_TX_STATUS_LABEL = {
+    "released":       "Released",
+    "fee_pending":    "Fee Pending",
+    "client_pending": "Client Pending",
+    "pending":        "Pending",
+}
+
+
 def _check_status_oob(tx_id: int) -> str:
-    """OOB spans updating sidebar and tx-row status based on disbursement client_received state."""
+    """OOB spans updating sidebar and tx-row status based on disbursement state."""
     disbursements = db_module.get_disbursements(tx_id)
-    released = bool(disbursements) and all(d.get("client_received") for d in disbursements)
-    css = "status-released" if released else "status-inv-pending"
-    label = "Released" if released else "Pending"
+    status = _tx_display_status(disbursements)
+    css = _TX_STATUS_CSS[status]
+    label = _TX_STATUS_LABEL[status]
     return (
         f'<span id="tx-sidebar-status" hx-swap-oob="true" class="status-badge {css}">{label}</span>'
         f'<span id="tx-status-{tx_id}" hx-swap-oob="true" class="status-badge {css}">{label}</span>'
@@ -2092,6 +2192,190 @@ def deferred_link_create(claim_id: int, tx_id: int):
 def deferred_link_delete(claim_id: int, tx_id: int, lid: int):
     db_module.delete_invoice_deferred_link(lid)
     return ""
+
+
+# ---------------------------------------------------------------------------
+# Payroll — claim payroll page
+# ---------------------------------------------------------------------------
+
+@app.route("/claims/<int:claim_id>/payroll")
+@login_required
+def claim_payroll(claim_id: int):
+    claim = db_module.get_claim(claim_id)
+    if not claim:
+        abort(404)
+    assignees = db_module.get_assignees(claim_id)
+    payroll_data = db_module.get_claim_payroll_data(claim_id)
+    historic = db_module.get_claim_historic_assignees(claim_id)
+    current_names = {a["name"] for a in assignees}
+    historic_names = {h["name"] for h in historic}
+    has_historic = bool(historic_names - current_names) or _has_split_pct_change(historic, assignees)
+    return render_template(
+        "payroll.html",
+        claim=claim,
+        assignees=assignees,
+        payroll_data=payroll_data,
+        has_historic=has_historic,
+        fee_recipients=db_module.get_all_fee_recipients(),
+        roles=ASSIGNEE_ROLES,
+    )
+
+
+def _has_split_pct_change(historic: list[dict], assignees: list[dict]) -> bool:
+    """True if any current assignee has a different split_pct than their historic min/max."""
+    current_map = {a["name"]: a["split_pct"] for a in assignees}
+    for h in historic:
+        name = h["name"]
+        if name in current_map:
+            if abs(float(current_map[name] or 0) - float(h["split_pct"] or 0)) > 0.01:
+                return True
+    return False
+
+
+@app.route("/claims/<int:claim_id>/payroll/historic-panel")
+@login_required
+def claim_payroll_historic(claim_id: int):
+    claim = db_module.get_claim(claim_id)
+    if not claim:
+        abort(404)
+    historic = db_module.get_claim_historic_assignees(claim_id)
+    return render_template("partials/_payroll_historic_panel.html",
+                           claim=claim, historic=historic)
+
+
+# ---------------------------------------------------------------------------
+# Payroll — site-wide payroll page
+# ---------------------------------------------------------------------------
+
+@app.route("/payroll")
+@login_required
+def site_payroll():
+    today = date.today()
+    default_from = "2000-01-01"   # wide default — user can narrow with the filter
+    default_to = today.isoformat()
+    date_from = request.args.get("date_from", default_from)
+    date_to   = request.args.get("date_to",   default_to)
+    payroll = db_module.get_site_payroll_data(date_from, date_to)
+    return render_template(
+        "site_payroll.html",
+        payroll=payroll,
+        date_from=date_from,
+        date_to=date_to,
+    )
+
+
+@app.route("/payroll/export.csv")
+@login_required
+def site_payroll_export():
+    today = date.today()
+    date_from = request.args.get("date_from", "2000-01-01")
+    date_to   = request.args.get("date_to",   today.isoformat())
+    payroll = db_module.get_site_payroll_data(date_from, date_to)
+
+    out = io.StringIO()
+    writer = csv.writer(out)
+    writer.writerow([
+        "Name", "Role", "Section", "Job #", "Claim #", "Insured",
+        "Check #", "Date", "Tx Type", "Split %",
+        "Collected Amount", "Deferred Amount", "Paid", "Paid Date",
+    ])
+    for p in payroll["payees"]:
+        for row in p["rows"]:
+            writer.writerow([
+                p["name"], row["role"], "Received",
+                row["job_number"], row["claim_number"], row["insured_name"],
+                row["check_number"], row["date"], row["type"],
+                row["split_pct"], row["earned"], "",
+                row["payroll_paid"], row["payroll_paid_date"],
+            ])
+        for row in p["pending_rows"]:
+            writer.writerow([
+                p["name"], row["role"], "Pending",
+                row["job_number"], row["claim_number"], row["insured_name"],
+                row["check_number"], row["date"], row["type"],
+                row["split_pct"], "", row["deferred"],
+                "", "",
+            ])
+        for row in p["exp_rows"]:
+            writer.writerow([
+                p["name"], row["role"], "Expense",
+                row["job_number"], row["claim_number"], row["insured_name"],
+                "", row["date"], "Expense",
+                row["split_pct"], row["owed"], "",
+                row["payroll_paid"], row["payroll_paid_date"],
+            ])
+
+    out.seek(0)
+    filename = f"payroll_{date_from}_{date_to}.csv"
+    return Response(
+        out.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@app.route("/payroll/mark-paid", methods=["POST"])
+@login_required
+def site_payroll_mark_paid_bulk():
+    paid_date = request.form.get("paid_date", date.today().isoformat())
+    split_ids = [int(x) for x in request.form.getlist("split_ids[]") if x]
+    exp_split_ids = [int(x) for x in request.form.getlist("exp_split_ids[]") if x]
+    if split_ids:
+        db_module.mark_splits_paid(split_ids, paid_date)
+    if exp_split_ids:
+        db_module.mark_expense_splits_paid(exp_split_ids, paid_date)
+    # Refresh the page after bulk action
+    date_from = request.form.get("date_from", "2000-01-01")
+    date_to   = request.form.get("date_to",   date.today().isoformat())
+    return redirect(url_for("site_payroll", date_from=date_from, date_to=date_to))
+
+
+@app.route("/payroll/splits/<int:sid>/toggle-paid", methods=["POST"])
+@login_required
+def site_split_toggle_paid(sid: int):
+    paid_date = request.form.get("paid_date", date.today().isoformat())
+    db_module.mark_split_paid_toggle(sid, paid_date)
+    # Return updated status badge for this split row
+    split = db_module.get_split(sid)
+    if not split:
+        return "", 404
+    fee_collected = db_module._payroll_fee_collected_for_tx(split["transaction_id"])
+    earned = round(fee_collected * float(split.get("split_pct") or 0) / 100, 2)
+    paid = float(split.get("payroll_paid") or 0)
+    status = db_module._payroll_status(earned, paid)
+    badge = _payroll_badge_html(status, paid, split.get("payroll_paid_date") or "")
+    return f'<span id="split-status-{sid}" hx-swap-oob="true">{badge}</span>'
+
+
+@app.route("/payroll/expense-splits/<int:sid>/toggle-paid", methods=["POST"])
+@login_required
+def site_expense_split_toggle_paid(sid: int):
+    paid_date = request.form.get("paid_date", date.today().isoformat())
+    db_module.mark_expense_split_paid_toggle(sid, paid_date)
+    es_row = db_module._row(db_module.get_db(),
+                            "SELECT * FROM expense_splits WHERE id=?", (sid,))
+    if not es_row:
+        return "", 404
+    es_row = dict(es_row)
+    exp_row = db_module._row(db_module.get_db(),
+                             "SELECT wp_amount FROM expenses WHERE id=?", (es_row["expense_id"],))
+    wp_amount = float(exp_row["wp_amount"] or 0) if exp_row else 0.0
+    earned = round(wp_amount * float(es_row.get("split_pct") or 0) / 100, 2)
+    paid = float(es_row.get("payroll_paid") or 0)
+    status = db_module._payroll_status(earned, paid)
+    badge = _payroll_badge_html(status, paid, es_row.get("payroll_paid_date") or "")
+    return f'<span id="exp-split-status-{sid}" hx-swap-oob="true">{badge}</span>'
+
+
+def _payroll_badge_html(status: str, paid: float, paid_date: str) -> str:
+    if status == "paid":
+        label = f"✓ {paid_date}" if paid_date else "✓ Paid"
+        return f'<span class="status-badge status-released">{label}</span>'
+    if status == "partial":
+        return f'<span class="status-badge status-inv-pending">Partial ${paid:,.2f}</span>'
+    if status == "n/a":
+        return '<span class="text-muted">—</span>'
+    return '<span class="text-muted">—</span>'
 
 
 # ---------------------------------------------------------------------------

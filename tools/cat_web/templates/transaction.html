@@ -72,12 +72,6 @@
     </section>
     {% endif %}
 
-    {# ── Disbursements ─────────────────────────────────────────────────────── #}
-    {% set disburse_types = ['escrow', 'escrow endorsed', 'carrier', 'draw'] %}
-    {% if (tx.type or '')|lower in disburse_types %}
-    {% include "partials/_disbursements_section.html" %}
-    {% endif %}
-
     {# ── Cumulative Escrow Checklist (Draw transactions only) ───────────────── #}
     {% if (tx.type or '')|lower == 'draw' %}
     <section class="section">
@@ -128,6 +122,12 @@
         {% endif %}
       </details>
     </section>
+    {% endif %}
+
+    {# ── Disbursements ─────────────────────────────────────────────────────── #}
+    {% set disburse_types = ['escrow', 'escrow endorsed', 'carrier', 'draw'] %}
+    {% if (tx.type or '')|lower in disburse_types %}
+    {% include "partials/_disbursements_section.html" %}
     {% endif %}
 
     {# ── Linked Deferred Fees (Fee Invoice only) ─────────────────────────── #}
@@ -276,8 +276,7 @@
         {% if is_escrow_type %}
           <span class="status-badge status-planned">Planned / Hypothetical</span>
         {% else %}
-          {% set all_rcvd = disbursements|length > 0 and disbursements|selectattr('client_received')|list|length == disbursements|length %}
-          <span id="tx-sidebar-status" class="status-badge {{ 'status-released' if all_rcvd else 'status-inv-pending' }}">{{ 'Released' if all_rcvd else 'Pending' }}</span>
+          <span id="tx-sidebar-status" class="status-badge {{ tx_status_css }}">{{ tx_status_label }}</span>
         {% endif %}
       </div>
 

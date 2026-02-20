@@ -7,20 +7,20 @@
 <tr id="{{ row_id }}">
   <td>
     <input type="text" name="name" class="input-sm" form="{{ form_id }}"
-           value="{{ v.name if v else '' }}" placeholder="Company name" required
+           value="{{ (v.name or '') if v else '' }}" placeholder="Company name" required
            style="min-width:160px">
   </td>
   <td>
     <input type="text" name="phone" class="input-sm" form="{{ form_id }}"
-           value="{{ v.phone if v else '' }}" placeholder="(555) 000-0000">
+           value="{{ (v.phone or '') if v else '' }}" placeholder="(555) 000-0000">
   </td>
   <td>
     <input type="email" name="email" class="input-sm" form="{{ form_id }}"
-           value="{{ v.email if v else '' }}" placeholder="email@example.com">
+           value="{{ (v.email or '') if v else '' }}" placeholder="email@example.com">
   </td>
   <td>
     <input type="text" name="notes" class="input-sm" form="{{ form_id }}"
-           value="{{ v.notes if v else '' }}">
+           value="{{ (v.notes or '') if v else '' }}">
   </td>
   <td class="actions-col nowrap">
     <button class="btn btn-primary btn-sm" form="{{ form_id }}" type="submit">Save</button>

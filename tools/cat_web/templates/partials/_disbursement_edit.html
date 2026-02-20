@@ -5,6 +5,7 @@
 {% set save_method = "post" if is_new else "put" %}
 {% set form_id = "disburse-form-" ~ row_id %}
 {% set eff_type = recipient_type if is_new else (d.recipient_type or recipient_type) %}
+{% set current_vendor_name = d.recipient_name if (d and eff_type == 'vendor') else '' %}
 
 <tr id="{{ row_id }}" data-insured-name="{{ claim.insured_name or '' }}">
   <td>
@@ -15,24 +16,35 @@
     </select>
   </td>
   <td>
+    {# Insured free-text field — disabled (excluded from submit) when vendor is selected #}
     <input name="recipient_name" type="text" class="input-sm"
            style="min-width:140px"
-           value="{{ d.recipient_name if d else '' }}" form="{{ form_id }}"
+           value="{{ d.recipient_name if (d and eff_type == 'insured') else '' }}"
+           form="{{ form_id }}"
            id="rname-{{ form_id }}"
-           placeholder="Recipient name">
-    <span id="vendor-sel-{{ form_id }}"
-          style="{{ '' if eff_type == 'vendor' else 'display:none' }}">
-      <select name="vendor_id" class="input-sm select-sm" form="{{ form_id }}"
-              onchange="syncVendorName(this, '{{ form_id }}')">
-        <option value="">— select vendor —</option>
-        {% for v in vendors %}
-        <option value="{{ v.id }}"
-                {% if d and d.vendor_id == v.id %}selected{% endif %}>
-          {{ v.name }}
-        </option>
-        {% endfor %}
-      </select>
-    </span>
+           placeholder="Recipient name"
+           {% if eff_type == 'vendor' %}disabled{% endif %}>
+
+    {# Vendor autocomplete — disabled when insured is selected #}
+    <input name="recipient_name" type="text" class="input-sm"
+           style="min-width:160px; {{ 'display:none' if eff_type != 'vendor' else '' }}"
+           id="vendor-ac-{{ form_id }}"
+           list="vendors-dl-{{ form_id }}"
+           value="{{ current_vendor_name }}"
+           form="{{ form_id }}"
+           placeholder="Search vendors…"
+           autocomplete="off"
+           oninput="onVendorInput(this, '{{ form_id }}')"
+           onchange="onVendorInput(this, '{{ form_id }}')"
+           {% if eff_type != 'vendor' %}disabled{% endif %}>
+    <datalist id="vendors-dl-{{ form_id }}">
+      {% for v in vendors %}
+      <option value="{{ v.name }}">{{ v.name }}</option>
+      {% endfor %}
+    </datalist>
+    <input type="hidden" name="vendor_id" id="vid-{{ form_id }}"
+           form="{{ form_id }}"
+           value="{{ d.vendor_id if d else '' }}">
   </td>
   <td>
     <input name="amount" type="number" step="0.01" class="input-sm input-num"
@@ -98,32 +110,66 @@
   f.style.display = 'none';
   document.body.appendChild(f);
   htmx.process(f);
-  // Init vendor visibility + auto-fill insured name
+
+  // Build vendor name→id lookup for this form
+  window['VENDOR_MAP_{{ form_id }}'] = {
+    {% for v in vendors %}"{{ v.name | replace('"', '\\"') }}": {{ v.id }},
+    {% endfor %}
+  };
+
+  // Init: auto-fill insured name if new insured row
   const typeSelect = document.querySelector('[form="{{ form_id }}"][name="recipient_type"]');
   if (typeSelect) toggleVendorField(typeSelect, '{{ form_id }}', true);
 })();
 
 function toggleVendorField(sel, fid, isInit) {
-  const vendorSel = document.getElementById('vendor-sel-' + fid);
-  const rname = document.getElementById('rname-' + fid);
-  if (sel.value === 'vendor') {
-    if (vendorSel) vendorSel.style.display = '';
-  } else {
-    if (vendorSel) vendorSel.style.display = 'none';
-    // Auto-fill insured name from data attribute on the row
+  const insuredInput = document.getElementById('rname-' + fid);
+  const vendorInput  = document.getElementById('vendor-ac-' + fid);
+  const isVendor = sel.value === 'vendor';
+
+  if (insuredInput) {
+    insuredInput.disabled = isVendor;
+    insuredInput.style.display = isVendor ? 'none' : '';
+  }
+  if (vendorInput) {
+    vendorInput.disabled = !isVendor;
+    vendorInput.style.display = isVendor ? '' : 'none';
+  }
+
+  // Auto-fill insured name from row data attribute
+  if (!isVendor && insuredInput) {
     const row = sel.closest('tr');
     const insuredName = row ? row.dataset.insuredName : '';
-    if (rname && insuredName && (isInit ? !rname.value : true)) {
-      rname.value = insuredName;
+    if (insuredName && (isInit ? !insuredInput.value : true)) {
+      insuredInput.value = insuredName;
     }
   }
 }
-function syncVendorName(sel, fid) {
-  const rname = document.getElementById('rname-' + fid);
-  if (rname && sel.options[sel.selectedIndex]) {
-    rname.value = sel.options[sel.selectedIndex].text;
+
+function onVendorInput(input, fid) {
+  const val = input.value.trim();
+  const map = window['VENDOR_MAP_' + fid];
+  const vidField = document.getElementById('vid-' + fid);
+  if (!vidField || !map) return;
+
+  if (val === '') {
+    vidField.value = '';
+    input.setCustomValidity('');
+    return;
+  }
+
+  // Exact match (case-sensitive — vendor names are stored as-is)
+  const id = map[val];
+  if (id !== undefined) {
+    vidField.value = id;
+    input.setCustomValidity('');
+  } else {
+    vidField.value = '';
+    input.setCustomValidity('Please select a vendor from the list.');
+    input.reportValidity();
   }
 }
+
 function calcDisburseFeePct(input, fid) {
   const form = document.getElementById(fid);
   if (!form) return;
@@ -134,7 +180,6 @@ function calcDisburseFeePct(input, fid) {
   const amt = parseFloat(amtInput.value) || 0;
   const pctVal = pctInput && pctInput.value !== '' ? parseFloat(pctInput.value) : {{ claim.contract_pct or 0 }};
   owedInput.value = (amt * pctVal / 100).toFixed(2);
-  // Auto-check Fee? when a non-zero fee % is entered
   if (pctInput && parseFloat(pctInput.value) > 0) {
     const cb = document.querySelector('[form="' + fid + '"][name="fee_applies"]');
     if (cb && !cb.checked) {

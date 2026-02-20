@@ -19,6 +19,7 @@
     <a href="{{ url_for('checks_queue') }}" class="{% if request.endpoint == 'checks_queue' %}active{% endif %}">Check Queue</a>
     <a href="{{ url_for('vendors_list') }}" class="{% if request.endpoint == 'vendors_list' %}active{% endif %}">Vendors</a>
     <a href="{{ url_for('fee_recipients_list') }}" class="{% if request.endpoint == 'fee_recipients_list' %}active{% endif %}">Fee Recipients</a>
+    <a href="{{ url_for('site_payroll') }}" class="{% if request.endpoint in ['site_payroll', 'site_payroll_export'] %}active{% endif %}">Payroll</a>
   </div>
   <div class="nav-user">
     <span>{{ current_user.username }}</span>

@@ -35,7 +35,8 @@
               title="{{ 'Client funds received — click to undo' if client_on else 'Mark client funds as received' }}">
         {{ '✓' if client_on else '○' }} Client Rcvd
       </button>
-      {% if d.fee_applies and (d.fee_owed or 0) > 0 %}
+      {% set fee_collectable = (d.fee_owed or 0) - (d.fee_deferred or 0) %}
+      {% if d.fee_applies and fee_collectable > 0.005 %}
       <button class="btn-toggle {{ 'btn-toggle-on' if fee_on else '' }}"
               hx-post="{{ url_for('disbursement_toggle_fee', claim_id=claim.id, tx_id=tx.id, did=d.id) }}"
               hx-target="#disburse-{{ d.id }}"

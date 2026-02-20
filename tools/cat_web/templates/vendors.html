@@ -7,6 +7,11 @@
 </div>
 
 <section class="section">
+  <div class="section-header" style="margin-bottom:10px">
+    <input type="search" id="vendor-search" class="input-sm" placeholder="Search vendors…"
+           style="max-width:280px" oninput="filterVendors(this.value)">
+    <span class="text-muted text-small" id="vendor-count"></span>
+  </div>
   <div class="table-wrap">
     <table class="table table-compact">
       <thead>
@@ -37,4 +42,21 @@
     </button>
   </div>
 </section>
+
+<script>
+function filterVendors(q) {
+  const term = q.trim().toLowerCase();
+  const rows = document.querySelectorAll('#vendors-tbody tr[id^="vendor-"]');
+  let visible = 0;
+  rows.forEach(row => {
+    if (row.id === 'vendor-new-row-placeholder') return;
+    const text = row.textContent.toLowerCase();
+    const show = !term || text.includes(term);
+    row.style.display = show ? '' : 'none';
+    if (show) visible++;
+  });
+  const count = document.getElementById('vendor-count');
+  if (count) count.textContent = term ? visible + ' result' + (visible !== 1 ? 's' : '') : '';
+}
+</script>
 {% endblock %}

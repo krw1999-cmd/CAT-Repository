@@ -1,0 +1,329 @@
+{% extends "base.html" %}
+{% block title %}Payroll — {{ claim.insured_name or 'Claim' }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <span class="breadcrumb">
+      <a href="{{ url_for('claims_list') }}">← Claims</a>
+      &nbsp;/&nbsp;
+      <a href="{{ url_for('claim_detail', claim_id=claim.id) }}">← {{ claim.insured_name or 'Claim' }}</a>
+    </span>
+    <h2>{{ claim.insured_name or 'Unnamed Claim' }} — Payroll</h2>
+  </div>
+  {% if has_historic %}
+  <button class="btn btn-ghost btn-sm"
+          hx-get="{{ url_for('claim_payroll_historic', claim_id=claim.id) }}"
+          hx-target="#historic-panel"
+          hx-swap="innerHTML">
+    ↻ Historic payee data
+  </button>
+  {% endif %}
+</div>
+
+<div id="historic-panel"></div>
+
+{# ── Payroll Assignees ────────────────────────────────────────────────────── #}
+<section class="section">
+  <div class="section-header">
+    <h3>Payroll Assignees</h3>
+    <span class="text-muted text-small">Total: <strong id="assignee-total">{{ "%.2f"|format(assignees|sum(attribute='split_pct')) }}%</strong></span>
+  </div>
+  <div class="table-wrap">
+    <table class="table table-compact">
+      <thead>
+        <tr>
+          <th>Role</th>
+          <th>Name</th>
+          <th class="num">Split %</th>
+          <th class="actions-col"></th>
+        </tr>
+      </thead>
+      <tbody id="assignees-tbody">
+        {% for assignee in assignees %}
+          {% include "partials/_assignee_row.html" %}
+        {% endfor %}
+        <tr id="assignee-new-row-placeholder"></tr>
+      </tbody>
+    </table>
+  </div>
+  <button class="btn btn-ghost btn-sm"
+          hx-get="{{ url_for('assignee_new_row', claim_id=claim.id) }}"
+          hx-target="#assignee-new-row-placeholder"
+          hx-swap="outerHTML">
+    + Add Assignee
+  </button>
+</section>
+
+{# ── Earnings Breakdown ───────────────────────────────────────────────────── #}
+<section class="section">
+  <div class="section-header">
+    <h3>Earnings Breakdown</h3>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center">
+      <label class="text-muted text-small">Show:</label>
+      <select id="filter-section" class="input-sm select-sm" onchange="applyFilters()">
+        <option value="all">All Sections</option>
+        <option value="received">Received</option>
+        <option value="pending">Pending</option>
+        <option value="expenses">Expenses</option>
+      </select>
+      <select id="filter-paid" class="input-sm select-sm" onchange="applyFilters()">
+        <option value="all">All Paid Status</option>
+        <option value="unpaid">Unpaid</option>
+        <option value="partial">Partial</option>
+        <option value="paid">Paid</option>
+      </select>
+      <select id="filter-person" class="input-sm select-sm" onchange="applyFilters()">
+        <option value="all">All People</option>
+        {% for p in payroll_data.payees %}
+        <option value="{{ p.name }}">{{ p.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+
+  {% if not payroll_data.payees %}
+  <p class="text-muted text-small" style="margin-top:12px">No payroll data yet — add transactions with splits to see earnings.</p>
+  {% endif %}
+
+  {% for payee in payroll_data.payees %}
+  {% set fee_remaining = payee.total_earned - payee.total_paid %}
+  {% set exp_outstanding = payee.total_exp_owed - payee.total_exp_paid %}
+  {% set net_earned = payee.total_earned - payee.total_exp_owed %}
+  {% set net_paid = payee.total_paid - payee.total_exp_paid %}
+  {% set net_owed = fee_remaining - exp_outstanding %}
+  <div class="payroll-card" data-person="{{ payee.name }}">
+    <div class="payroll-card-header">
+      <div class="payroll-card-name">{{ payee.name or '(unnamed)' }}</div>
+      <div class="payroll-card-summary">
+        <span>Fees: Earned <strong>{{ payee.total_earned | money }}</strong> | Paid <strong>{{ payee.total_paid | money }}</strong> | Remaining <strong {% if fee_remaining > 0.005 %}style="color:var(--red)"{% endif %}>{{ fee_remaining | money }}</strong></span>
+        {% if payee.exp_rows %}
+        <span style="margin-left:16px">Expenses: Owed <strong>{{ payee.total_exp_owed | money }}</strong> | Paid <strong>{{ payee.total_exp_paid | money }}</strong> | Outstanding <strong {% if exp_outstanding > 0.005 %}style="color:var(--red)"{% endif %}>{{ exp_outstanding | money }}</strong></span>
+        {% endif %}
+        <span class="payroll-net-summary">Net: Earned <strong>{{ net_earned | money }}</strong> | Paid <strong>{{ net_paid | money }}</strong> | Owed <strong {% if net_owed > 0.005 %}style="color:var(--red)"{% elif net_owed < -0.005 %}style="color:var(--green)"{% endif %}>{{ net_owed | money }}</strong></span>
+      </div>
+    </div>
+
+    {# Received section #}
+    {% if payee.rows %}
+    <div class="payroll-subsection" data-section="received">
+      <div class="payroll-subsection-label">Received</div>
+      <table class="table table-compact">
+        <thead>
+          <tr>
+            <th>Check #</th>
+            <th>Date</th>
+            <th>Type</th>
+            <th>Role</th>
+            <th class="num">Split %</th>
+            <th class="num">Earned</th>
+            <th>Paid?</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in payee.rows %}
+          <tr class="payroll-row" data-status="{{ row.status }}">
+            <td><a href="{{ url_for('tx_detail', claim_id=claim.id, tx_id=row.tx_id) }}" class="text-muted">{{ row.check_number or '—' }}</a></td>
+            <td>{{ row.date or '—' }}</td>
+            <td>{{ row.type }}</td>
+            <td class="capitalize">{{ row.role }}</td>
+            <td class="num">{{ "%.2f"|format(row.split_pct or 0) }}%</td>
+            <td class="num"><strong>{{ row.earned | money }}</strong></td>
+            <td>
+              {% if row.status == 'paid' %}
+              <span class="status-badge status-released">✓ {{ row.payroll_paid_date or 'Paid' }}</span>
+              {% elif row.status == 'partial' %}
+              <span class="status-badge status-inv-pending">Partial {{ row.payroll_paid | money }}</span>
+              {% else %}
+              <span class="text-muted">—</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    {# Pending section #}
+    {% if payee.pending_rows %}
+    <div class="payroll-subsection" data-section="pending">
+      <div class="payroll-subsection-label">Pending</div>
+      <table class="table table-compact">
+        <thead>
+          <tr>
+            <th>Check #</th>
+            <th>Date</th>
+            <th>Type</th>
+            <th>Role</th>
+            <th class="num">Split %</th>
+            <th class="num">Amount</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in payee.pending_rows %}
+          <tr class="payroll-row" data-status="n/a">
+            <td><a href="{{ url_for('tx_detail', claim_id=claim.id, tx_id=row.tx_id) }}" class="text-muted">{{ row.check_number or '—' }}</a></td>
+            <td>{{ row.date or '—' }}</td>
+            <td>{{ row.type }}</td>
+            <td class="capitalize">{{ row.role }}</td>
+            <td class="num">{{ "%.2f"|format(row.split_pct or 0) }}%</td>
+            <td class="num">{{ row.deferred | money }}</td>
+            <td>
+              {% if row.pending_type == 'not_received' %}
+              <span class="status-badge status-inv-pending">Fee not received</span>
+              {% elif row.invoice_info %}
+              <span class="status-badge status-inv-pending" title="Invoice outstanding">
+                Deferred — #{{ row.invoice_info.invoice_number }}
+                ({{ row.invoice_info.outstanding | money }} {{ row.invoice_info.status }})
+              </span>
+              {% else %}
+              <span class="text-muted">Deferred</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    {# Expenses section #}
+    {% if payee.exp_rows %}
+    <div class="payroll-subsection" data-section="expenses">
+      <div class="payroll-subsection-label">Expenses</div>
+      <table class="table table-compact">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Vendor</th>
+            <th>Role</th>
+            <th class="num">Split %</th>
+            <th class="num">Owed (WP share)</th>
+            <th>Paid?</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in payee.exp_rows %}
+          <tr class="payroll-row" data-status="{{ row.status }}">
+            <td>{{ row.date or '—' }}</td>
+            <td>{{ row.vendor or '—' }}</td>
+            <td class="capitalize">{{ row.role }}</td>
+            <td class="num">{{ "%.2f"|format(row.split_pct or 0) }}%</td>
+            <td class="num"><strong>{{ row.owed | money }}</strong></td>
+            <td>
+              {% if row.status == 'paid' %}
+              <span class="status-badge status-released">✓ {{ row.payroll_paid_date or 'Paid' }}</span>
+              {% elif row.status == 'partial' %}
+              <span class="status-badge status-inv-pending">Partial {{ row.payroll_paid | money }}</span>
+              {% else %}
+              <span class="text-muted">—</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    {% if not payee.rows and not payee.pending_rows and not payee.exp_rows %}
+    <p class="text-muted text-small" style="padding:12px">No earned amounts yet.</p>
+    {% endif %}
+  </div>
+  {% endfor %}
+</section>
+
+<style>
+.payroll-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  margin-top: 16px;
+  overflow: hidden;
+}
+.payroll-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  background: #f8fafc;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.payroll-card-name {
+  font-weight: 700;
+  font-size: 15px;
+}
+.payroll-card-summary {
+  font-size: 13px;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.payroll-net-summary {
+  margin-left: 16px;
+  padding-left: 16px;
+  border-left: 2px solid var(--border);
+  color: var(--text);
+  font-weight: 600;
+}
+.payroll-subsection { border-top: 1px solid var(--border); }
+.payroll-subsection-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  color: var(--muted);
+  padding: 6px 12px 4px;
+  background: #fafafa;
+}
+</style>
+
+<script>
+function applyFilters() {
+  const section = document.getElementById('filter-section').value;
+  const paid    = document.getElementById('filter-paid').value;
+  const person  = document.getElementById('filter-person').value;
+
+  document.querySelectorAll('.payroll-card').forEach(card => {
+    const cardPerson = card.dataset.person;
+    if (person !== 'all' && cardPerson !== person) {
+      card.style.display = 'none';
+      return;
+    }
+    card.style.display = '';
+
+    let cardHasVisibleRows = false;
+
+    card.querySelectorAll('.payroll-subsection').forEach(sub => {
+      const subSection = sub.dataset.section;
+      if (section !== 'all' && subSection !== section) {
+        sub.style.display = 'none';
+        return;
+      }
+      sub.style.display = '';
+
+      let subHasVisible = false;
+      sub.querySelectorAll('.payroll-row').forEach(row => {
+        const rowStatus = row.dataset.status;
+        let show = true;
+        if (paid !== 'all' && rowStatus !== paid) show = false;
+        row.style.display = show ? '' : 'none';
+        if (show) subHasVisible = true;
+      });
+      if (!subHasVisible) sub.style.display = 'none';
+      else cardHasVisibleRows = true;
+    });
+
+    if (!cardHasVisibleRows && (section !== 'all' || paid !== 'all')) {
+      card.style.display = 'none';
+    }
+  });
+}
+</script>
+{% endblock %}

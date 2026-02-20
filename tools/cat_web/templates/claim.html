@@ -7,6 +7,7 @@
     <a href="{{ url_for('claims_list') }}" class="breadcrumb">← Claims</a>
     <h2>{{ claim.insured_name or 'Unnamed Claim' }}</h2>
   </div>
+  <a href="{{ url_for('claim_payroll', claim_id=claim.id) }}" class="btn btn-ghost btn-sm">Payroll →</a>
 </div>
 
 {# ── Claim Header ────────────────────────────────────────────────────────── #}
@@ -45,6 +46,53 @@
           hx-swap="outerHTML">
     + Add Limit
   </button>
+
+  {% if coverage_pivot.has_data %}
+  <details class="coverage-pivot-details">
+    <summary>Coverage allocation by check</summary>
+    <div class="table-wrap table-scroll" style="margin-top:8px; border-radius:var(--radius)">
+      <table class="table table-compact coverage-pivot-table">
+        <thead>
+          <tr>
+            <th>Coverage</th>
+            {% for tx in coverage_pivot.transactions %}
+            <th class="num" style="min-width:100px">
+              <a href="{{ url_for('tx_detail', claim_id=claim.id, tx_id=tx.id) }}" class="text-muted" style="text-decoration:none; display:inline-block; line-height:1.4">
+                <span class="tx-type-badge tx-type-{{ (tx.type or 'other')|lower|replace(' ', '-') }}" style="font-size:10px">{{ tx.type or '?' }}</span><br>
+                <span style="font-weight:600">{{ tx.check_number or '—' }}</span><br>
+                <span class="text-small text-muted">{{ tx.date or '' }}</span>
+              </a>
+            </th>
+            {% endfor %}
+            <th class="num">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in coverage_pivot.rows %}
+          <tr>
+            <td>{{ row.coverage }}</td>
+            {% for cell in row.cells %}
+            <td class="num">
+              {% if cell > 0 %}{{ cell | money }}{% else %}<span class="text-muted">—</span>{% endif %}
+            </td>
+            {% endfor %}
+            <td class="num"><strong>{{ row.total | money }}</strong></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr class="totals-row">
+            <td><strong>Total</strong></td>
+            {% for tot in coverage_pivot.tx_totals %}
+            <td class="num"><strong>{{ tot | money }}</strong></td>
+            {% endfor %}
+            <td class="num"><strong>{{ coverage_pivot.grand_total | money }}</strong></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  </details>
+  {% endif %}
 </section>
 
 {# ── Transactions ─────────────────────────────────────────────────────────── #}
@@ -128,39 +176,4 @@
   </button>
 </section>
 
-{# ── Assignees (claim-level split defaults) ───────────────────────────────── #}
-<section class="section">
-  <div class="section-header">
-    <h3>Payroll Assignees</h3>
-    <span class="text-muted text-small">Total: <strong id="assignee-total">{{ "%.2f"|format(assignees|sum(attribute='split_pct'))  }}%</strong></span>
-  </div>
-  <div class="table-wrap">
-    <table class="table table-compact">
-      <thead>
-        <tr>
-          <th>Role</th>
-          <th>Name</th>
-          <th class="num">Split %</th>
-          <th class="actions-col"></th>
-        </tr>
-      </thead>
-      <tbody id="assignees-tbody">
-        {% for assignee in assignees %}
-          {% include "partials/_assignee_row.html" %}
-        {% endfor %}
-        <tr id="assignee-new-row-placeholder"></tr>
-      </tbody>
-    </table>
-  </div>
-  <button class="btn btn-ghost btn-sm"
-          hx-get="{{ url_for('assignee_new_row', claim_id=claim.id) }}"
-          hx-target="#assignee-new-row-placeholder"
-          hx-swap="outerHTML">
-    + Add Assignee
-  </button>
-</section>
-
-<script>
-const contractPct = {{ (claim.contract_pct or 0) / 100 }};
-</script>
 {% endblock %}

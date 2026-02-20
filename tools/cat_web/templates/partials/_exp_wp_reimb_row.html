@@ -1,0 +1,21 @@
+<tr id="exp-wp-reimb-{{ r.id }}">
+  <td class="nowrap">{{ r.date or '—' }}</td>
+  <td class="num">{{ (r.amount or 0) | money }}</td>
+  <td class="text-small">
+    {% if r.method == 'check' %}Check
+    {% elif r.method == 'ach' %}ACH
+    {% elif r.method == 'cc' %}CC
+    {% elif r.method %}{{ r.method | capitalize }}
+    {% else %}—{% endif %}
+  </td>
+  <td class="text-small">{{ r.reference or '—' }}</td>
+  <td class="text-small text-muted">{{ r.notes or '—' }}</td>
+  <td class="actions-col">
+    <button class="btn-icon btn-icon-danger"
+            hx-delete="{{ url_for('exp_wp_reimb_delete', claim_id=claim.id, exp_id=expense.id, rid=r.id) }}"
+            hx-target="#exp-wp-reimb-{{ r.id }}"
+            hx-swap="outerHTML"
+            hx-confirm="Delete this reimbursement?"
+            title="Delete">✕</button>
+  </td>
+</tr>

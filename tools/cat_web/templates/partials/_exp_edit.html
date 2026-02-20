@@ -14,12 +14,13 @@
     <input name="payee_name" type="text" class="input-sm"
            list="{{ dl_id }}"
            id="exp-payee-{{ row_id }}"
-           value="{{ exp.payee_name if exp else '' }}"
+           value="{{ (exp.payee_name or '') if exp else '' }}"
            form="{{ form_id }}"
-           placeholder="Payee / vendor"
+           placeholder="Search vendors…"
            autocomplete="off"
            style="min-width:160px"
-           oninput="expSyncVendorId('{{ row_id }}', this.value)">
+           oninput="expValidateVendor('{{ row_id }}', this)"
+           onchange="expValidateVendor('{{ row_id }}', this)">
     <input type="hidden" name="vendor_id"
            id="exp-vendor-id-{{ row_id }}"
            value="{{ exp.vendor_id if exp and exp.vendor_id else '' }}"
@@ -75,19 +76,37 @@
   document.body.appendChild(f);
   htmx.process(f);
 
-  const dl = document.getElementById('{{ dl_id }}');
-  window._expVendorMap = window._expVendorMap || {};
-  if (dl) {
-    Array.from(dl.options).forEach(opt => {
-      window._expVendorMap[opt.value.toLowerCase()] = opt.dataset.id;
-    });
-  }
+  // Build per-row vendor name → id map (exact, case-sensitive)
+  window['EXP_VENDOR_MAP_{{ row_id }}'] = {
+    {% for v in vendors %}"{{ v.name | replace('"', '\\"') }}": {{ v.id }},
+    {% endfor %}
+  };
+
+  // Validate pre-filled value on edit
+  const payeeInput = document.getElementById('exp-payee-{{ row_id }}');
+  if (payeeInput && payeeInput.value) expValidateVendor('{{ row_id }}', payeeInput);
 })();
 
-function expSyncVendorId(rowId, val) {
-  const hiddenEl = document.getElementById('exp-vendor-id-' + rowId);
-  if (!hiddenEl) return;
-  const match = window._expVendorMap && window._expVendorMap[val.trim().toLowerCase()];
-  hiddenEl.value = match || '';
+function expValidateVendor(rowId, input) {
+  const val = input.value.trim();
+  const map = window['EXP_VENDOR_MAP_' + rowId];
+  const vidField = document.getElementById('exp-vendor-id-' + rowId);
+  if (!map || !vidField) return;
+
+  if (val === '') {
+    vidField.value = '';
+    input.setCustomValidity('');
+    return;
+  }
+
+  const id = map[val];
+  if (id !== undefined) {
+    vidField.value = id;
+    input.setCustomValidity('');
+  } else {
+    vidField.value = '';
+    input.setCustomValidity('Please select a vendor from the list.');
+    input.reportValidity();
+  }
 }
 </script>
