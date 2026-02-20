@@ -14,6 +14,11 @@
                value="{{ claim.carrier or '' }}" class="input-sm">
       </div>
       <div class="header-field">
+        <label class="label" for="mortgage_company">Mortgage Co.</label>
+        <input id="mortgage_company" name="mortgage_company" type="text"
+               value="{{ claim.mortgage_company or '' }}" class="input-sm">
+      </div>
+      <div class="header-field">
         <label class="label" for="contract_pct">Contract %</label>
         <input id="contract_pct" name="contract_pct" type="number"
                step="0.01" min="0" max="100"
@@ -56,6 +61,12 @@
           <option value="wire"           {% if claim.proc_method_escrow == 'wire' %}selected{% endif %}>Wire / ACH</option>
         </select>
       </div>
+    </div>
+    <div style="margin-top:8px">
+      <label class="label" for="claim_notes">Notes</label>
+      <textarea id="claim_notes" name="notes" class="input-sm"
+                style="width:100%; min-height:60px; resize:vertical; font-family:inherit; font-size:13px"
+                placeholder="Optional notes…">{{ claim.notes or '' }}</textarea>
     </div>
     <div class="header-actions">
       <button type="submit" class="btn btn-primary btn-sm">Save</button>

@@ -138,10 +138,17 @@
 <script>
 (function() {
   const _carrierName = {{ claim.carrier | tojson }};
+  const _mortgageCo  = {{ claim.mortgage_company | tojson }};
   const _checkTypes = ['escrow', 'escrow endorsed', 'carrier'];
   window.txInfoAutoFillPayer = function(sel, isInit) {
     const payerInput = sel.closest('form').querySelector('[name="payer"]');
-    if (_carrierName && payerInput && _checkTypes.includes(sel.value.toLowerCase())) {
+    if (!payerInput) return;
+    const type = sel.value.toLowerCase();
+    if (type === 'draw' && _mortgageCo) {
+      if (isInit ? !payerInput.value : true) {
+        payerInput.value = _mortgageCo;
+      }
+    } else if (_carrierName && _checkTypes.includes(type)) {
       if (isInit ? !payerInput.value : true) {
         payerInput.value = _carrierName;
       }

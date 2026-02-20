@@ -9,7 +9,8 @@
   <td>{{ d.recipient_name or '—' }}</td>
   <td class="num">{{ (d.amount or 0) | money }}</td>
   <td class="text-center">
-    {% if d.fee_applies %}✓{% else %}<span class="text-muted">—</span>{% endif %}
+    {% set eff_pct = d.fee_pct if (d.fee_pct is not none and d.fee_pct != '') else (claim.contract_pct or 0) %}
+    {% if d.fee_applies and eff_pct > 0 %}✓{% else %}<span class="text-muted">—</span>{% endif %}
   </td>
   <td class="num text-small">
     {% if d.fee_pct is not none and d.fee_pct != '' %}
@@ -21,13 +22,20 @@
   <td class="num">{{ (d.fee_owed or 0) | money }}</td>
   <td class="num">{{ (d.fee_collected or 0) | money }}</td>
   <td class="num">{{ (d.fee_deferred or 0) | money }}</td>
-  <td class="num">{{ (d.fee_recouped or 0) | money }}</td>
+  <td class="num">
+    {% if tx.has_linked_invoice %}
+      <span class="text-muted text-small">via invoice</span>
+    {% else %}
+      {{ (d.fee_recouped or 0) | money }}
+    {% endif %}
+  </td>
   <td class="text-small text-muted">{{ d.notes or '' }}</td>
   <td class="actions-col nowrap">
     {% set collect_types = ['carrier', 'draw', 'escrow endorsed'] %}
     {% if (tx.type or '')|lower in collect_types %}
       {% set client_on = d.client_received %}
-      {% set fee_on = (d.fee_collected or 0) >= (d.fee_owed or 0) > 0 %}
+      {% set fee_collectable = (d.fee_owed or 0) - (d.fee_deferred or 0) %}
+      {% set fee_on = fee_collectable > 0.005 and (d.fee_collected or 0) >= fee_collectable - 0.005 %}
       <button class="btn-toggle {{ 'btn-toggle-on' if client_on else '' }}"
               hx-post="{{ url_for('disbursement_toggle_client', claim_id=claim.id, tx_id=tx.id, did=d.id) }}"
               hx-target="#disburse-{{ d.id }}"
@@ -35,7 +43,6 @@
               title="{{ 'Client funds received — click to undo' if client_on else 'Mark client funds as received' }}">
         {{ '✓' if client_on else '○' }} Client Rcvd
       </button>
-      {% set fee_collectable = (d.fee_owed or 0) - (d.fee_deferred or 0) %}
       {% if d.fee_applies and fee_collectable > 0.005 %}
       <button class="btn-toggle {{ 'btn-toggle-on' if fee_on else '' }}"
               hx-post="{{ url_for('disbursement_toggle_fee', claim_id=claim.id, tx_id=tx.id, did=d.id) }}"

@@ -273,7 +273,9 @@
       {% set is_escrow_type = (tx.type or '')|lower == 'escrow' %}
       <div class="sidebar-label">Status</div>
       <div class="sidebar-value" style="font-size:14px">
-        {% if is_escrow_type %}
+        {% if tx.void %}
+          <span id="tx-sidebar-status" class="status-badge status-void">Void</span>
+        {% elif is_escrow_type %}
           <span class="status-badge status-planned">Planned / Hypothetical</span>
         {% else %}
           <span id="tx-sidebar-status" class="status-badge {{ tx_status_css }}">{{ tx_status_label }}</span>
@@ -287,7 +289,7 @@
         <span id="disburse-sidebar-net">{{ disburse_totals.net_to_insured | money }}</span>
       </div>
 
-      <div class="sidebar-label">To Vendors</div>
+      <div class="sidebar-label">Net to Vendors</div>
       <div class="sidebar-value">
         <span id="disburse-sidebar-vendors">{{ disburse_totals.to_vendors | money }}</span>
       </div>
@@ -330,5 +332,85 @@
 
 <script>
 const contractPct = {{ (claim.contract_pct or 0) / 100 }};
+
+/* ── Disbursement row editing helpers (defined here so they survive HTMX swaps) ── */
+
+function disbSave(fid, method, url, rowId) {
+  // Build a temporary hidden form so HTMX's full pipeline (incl. OOB swaps) handles the response
+  var f = document.createElement('form');
+  f.setAttribute('hx-' + method, url);
+  f.setAttribute('hx-target', '#' + rowId);
+  f.setAttribute('hx-swap', 'outerHTML');
+  f.style.display = 'none';
+  document.querySelectorAll("[form='" + fid + "']:not([disabled])").forEach(function(el) {
+    if (!el.name) return;
+    if (el.type === 'checkbox' && !el.checked) return;
+    var h = document.createElement('input');
+    h.type = 'hidden'; h.name = el.name; h.value = el.value;
+    f.appendChild(h);
+  });
+  document.body.appendChild(f);
+  htmx.process(f);
+  f.dispatchEvent(new Event('submit', {bubbles: true, cancelable: true}));
+}
+
+function toggleFeeFields(cb, fid) { /* fee columns always visible */ }
+
+function toggleVendorField(sel, fid, isInit) {
+  const insuredInput = document.getElementById('rname-' + fid);
+  const vendorInput  = document.getElementById('vendor-ac-' + fid);
+  const isVendor = sel.value === 'vendor';
+  if (insuredInput) {
+    insuredInput.disabled = isVendor;
+    insuredInput.style.display = isVendor ? 'none' : '';
+  }
+  if (vendorInput) {
+    vendorInput.disabled = !isVendor;
+    vendorInput.style.display = isVendor ? '' : 'none';
+  }
+  if (!isVendor && insuredInput) {
+    const row = sel.closest('tr');
+    const insuredName = row ? row.dataset.insuredName : '';
+    if (insuredName && (isInit ? !insuredInput.value : true)) {
+      insuredInput.value = insuredName;
+    }
+  }
+}
+
+function onVendorInput(input, fid) {
+  const val = input.value.trim();
+  const map = window['VENDOR_MAP_' + fid];
+  const vidField = document.getElementById('vid-' + fid);
+  if (!vidField || !map) return;
+  if (val === '') { vidField.value = ''; input.setCustomValidity(''); return; }
+  const id = map[val];
+  if (id !== undefined) {
+    vidField.value = id;
+    input.setCustomValidity('');
+  } else {
+    vidField.value = '';
+    input.setCustomValidity('Please select a vendor from the list.');
+    input.reportValidity();
+  }
+}
+
+function calcDisburseFeePct(input, fid) {
+  const amtInput  = document.querySelector('[form="' + fid + '"][name="amount"]');
+  const pctInput  = document.getElementById('fpct-' + fid);
+  const owedInput = document.getElementById('fowed-' + fid);
+  if (!amtInput || !owedInput) return;
+  const amt    = parseFloat(amtInput.value) || 0;
+  const defPct = pctInput ? parseFloat(pctInput.placeholder || '0') : 0;
+  const pctVal = (pctInput && pctInput.value !== '') ? parseFloat(pctInput.value) : defPct;
+  owedInput.value = (amt * pctVal / 100).toFixed(2);
+  const cb = document.querySelector('[form="' + fid + '"][name="fee_applies"]');
+  if (cb) {
+    if (pctVal > 0) {
+      if (!cb.checked) { cb.checked = true; toggleFeeFields(cb, fid); }
+    } else {
+      if (cb.checked) { cb.checked = false; toggleFeeFields(cb, fid); }
+    }
+  }
+}
 </script>
 {% endblock %}

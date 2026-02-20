@@ -8,12 +8,14 @@
 <tr id="{{ row_id }}">
   <td>
     <input type="text" name="coverage_type" class="input-sm"
+           id="cov-ct-{{ row_id }}"
            list="{{ dl_id }}"
            value="{{ cov.coverage_type if cov else '' }}"
-           placeholder="Coverage type"
+           placeholder="Search coverage…"
            autocomplete="off"
            form="{{ form_id }}"
-           style="min-width:120px">
+           style="min-width:140px"
+           onblur="validateCovType(this)">
     <datalist id="{{ dl_id }}">
       {% for ct in coverage_types %}
       <option value="{{ ct }}"></option>
@@ -53,5 +55,17 @@
   f.style.display = 'none';
   document.body.appendChild(f);
   htmx.process(f);
+
+  // Register allowed values for this row's input
+  window['COV_TYPES_{{ row_id }}'] = new Set({{ coverage_types | tojson }});
 })();
+
+function validateCovType(input) {
+  const rowId = input.id.replace('cov-ct-', '');
+  const allowed = window['COV_TYPES_' + rowId];
+  if (allowed && input.value && !allowed.has(input.value)) {
+    input.value = '';
+    input.focus();
+  }
+}
 </script>

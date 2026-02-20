@@ -312,6 +312,7 @@ _MIGRATIONS = [
     ("transaction_splits", "payroll_paid_date",        "TEXT"),
     ("expense_splits",     "payroll_paid",             "REAL DEFAULT 0"),
     ("expense_splits",     "payroll_paid_date",        "TEXT"),
+    ("claims",             "notes",                   "TEXT"),
 ]
 
 ASSIGNEE_ROLES = ["firm", "sales", "adjuster", "referrer", "other"]
@@ -364,6 +365,14 @@ def get_coverage_types() -> list[str]:
     """Return all coverage types from the catalog, sorted alphabetically."""
     rows = get_db().execute(
         "SELECT name FROM coverage_type_catalog ORDER BY name"
+    ).fetchall()
+    return [r[0] for r in rows]
+
+def get_claim_coverage_types(claim_id: int) -> list[str]:
+    """Return coverage types from this claim's policy limits, in entry order."""
+    rows = get_db().execute(
+        "SELECT coverage_type FROM policy_limits WHERE claim_id = ? ORDER BY id",
+        (claim_id,),
     ).fetchall()
     return [r[0] for r in rows]
 
@@ -483,15 +492,16 @@ def create_claim(data: dict) -> int:
     now = _now()
     cur = get_db().execute(
         """INSERT INTO claims (job_number, claim_number, insured_name, carrier,
-                               contract_pct,
+                               contract_pct, mortgage_company, notes,
                                proc_method_carrier, proc_method_draw, proc_method_escrow,
                                created_at, updated_at)
            VALUES (:job_number, :claim_number, :insured_name, :carrier,
-                   :contract_pct,
+                   :contract_pct, :mortgage_company, :notes,
                    :proc_method_carrier, :proc_method_draw, :proc_method_escrow,
                    :now, :now)""",
         {
             **data,
+            "mortgage_company":    data.get("mortgage_company") or None,
             "proc_method_carrier": data.get("proc_method_carrier") or None,
             "proc_method_draw":    data.get("proc_method_draw") or None,
             "proc_method_escrow":  data.get("proc_method_escrow") or None,
@@ -506,6 +516,8 @@ def update_claim(claim_id: int, data: dict) -> None:
         """UPDATE claims SET job_number=:job_number, claim_number=:claim_number,
                              insured_name=:insured_name, carrier=:carrier,
                              contract_pct=:contract_pct,
+                             mortgage_company=:mortgage_company,
+                             notes=:notes,
                              proc_method_carrier=:proc_method_carrier,
                              proc_method_draw=:proc_method_draw,
                              proc_method_escrow=:proc_method_escrow,
@@ -513,6 +525,7 @@ def update_claim(claim_id: int, data: dict) -> None:
            WHERE id = :id""",
         {
             **data,
+            "mortgage_company":    data.get("mortgage_company") or None,
             "proc_method_carrier": data.get("proc_method_carrier") or None,
             "proc_method_draw":    data.get("proc_method_draw") or None,
             "proc_method_escrow":  data.get("proc_method_escrow") or None,
@@ -632,14 +645,16 @@ def get_transactions(claim_id: int) -> list[dict]:
                CASE WHEN dr.total_count > 0 AND dr.received_count = dr.total_count THEN 1 ELSE 0 END AS all_client_rcvd,
                CASE WHEN dr.fee_total_count IS NULL OR dr.fee_total_count = 0 OR dr.fee_received_count = dr.fee_total_count THEN 1 ELSE 0 END AS all_fee_rcvd,
                CASE WHEN dr.total_count > 0 AND dr.received_count = dr.total_count
-                         AND (COALESCE(dr.fee_total_count,0) = 0 OR dr.fee_received_count = dr.fee_total_count) THEN 1 ELSE 0 END AS all_disburse_received
+                         AND (COALESCE(dr.fee_total_count,0) = 0 OR dr.fee_received_count = dr.fee_total_count) THEN 1 ELSE 0 END AS all_disburse_received,
+               CASE WHEN lnk_d.deferred_tx_id IS NOT NULL THEN 1 ELSE 0 END AS has_linked_invoice,
+               COALESCE(lnk_i.linked_deferred_total, 0) AS linked_deferred_total
         FROM transactions t
         LEFT JOIN (
             SELECT transaction_id,
                    SUM(CASE WHEN recipient_type='insured'
-                       THEN amount - fee_collected ELSE 0 END)  AS net_to_insured,
+                       THEN amount - fee_owed + fee_deferred - fee_recouped ELSE 0 END) AS net_to_insured,
                    SUM(CASE WHEN recipient_type='vendor'
-                       THEN amount ELSE 0 END)                   AS to_vendors,
+                       THEN amount - fee_owed + fee_deferred - fee_recouped ELSE 0 END) AS to_vendors,
                    SUM(fee_owed)                                 AS disburse_fee_owed,
                    SUM(fee_collected)                            AS disburse_fee_collected,
                    SUM(fee_deferred)                             AS disburse_fee_deferred,
@@ -657,10 +672,24 @@ def get_transactions(claim_id: int) -> list[dict]:
                    COUNT(*) AS total_count,
                    SUM(CASE WHEN client_received THEN 1 ELSE 0 END) AS received_count,
                    SUM(CASE WHEN fee_applies=1 AND (fee_owed - COALESCE(fee_deferred,0)) > 0.005 THEN 1 ELSE 0 END) AS fee_total_count,
-                   SUM(CASE WHEN fee_applies=1 AND (fee_owed - COALESCE(fee_deferred,0)) > 0.005 AND fee_collected >= fee_owed THEN 1 ELSE 0 END) AS fee_received_count
+                   SUM(CASE WHEN fee_applies=1 AND (fee_owed - COALESCE(fee_deferred,0)) > 0.005 AND fee_collected >= (fee_owed - COALESCE(fee_deferred,0)) - 0.005 THEN 1 ELSE 0 END) AS fee_received_count
             FROM disbursements
             GROUP BY transaction_id
         ) dr ON dr.transaction_id = t.id
+        LEFT JOIN (
+            SELECT deferred_tx_id FROM invoice_deferred_links GROUP BY deferred_tx_id
+        ) lnk_d ON lnk_d.deferred_tx_id = t.id
+        LEFT JOIN (
+            SELECT idl.invoice_tx_id,
+                   SUM(COALESCE(dd.disburse_fee_deferred, tt.deferred, 0)) AS linked_deferred_total
+            FROM invoice_deferred_links idl
+            JOIN transactions tt ON tt.id = idl.deferred_tx_id
+            LEFT JOIN (
+                SELECT transaction_id, SUM(fee_deferred) AS disburse_fee_deferred
+                FROM disbursements GROUP BY transaction_id
+            ) dd ON dd.transaction_id = tt.id
+            GROUP BY idl.invoice_tx_id
+        ) lnk_i ON lnk_i.invoice_tx_id = t.id
         WHERE t.claim_id = ?
         ORDER BY t.sequence_number, t.id
     """
@@ -669,10 +698,12 @@ def get_transactions(claim_id: int) -> list[dict]:
 def get_transaction(tx_id: int) -> dict | None:
     row = _row(get_db(), """
         SELECT t.*, v.name AS inv_vendor_name,
-               fee_inv.invoice_number AS proc_fee_inv_number
+               fee_inv.invoice_number AS proc_fee_inv_number,
+               CASE WHEN idl.id IS NOT NULL THEN 1 ELSE 0 END AS has_linked_invoice
         FROM transactions t
         LEFT JOIN vendors v ON v.id = t.inv_vendor_id
         LEFT JOIN transactions fee_inv ON fee_inv.id = t.proc_fee_invoice_id
+        LEFT JOIN invoice_deferred_links idl ON idl.deferred_tx_id = t.id
         WHERE t.id = ?
     """, (tx_id,))
     return dict(row) if row else None
@@ -701,6 +732,7 @@ def create_transaction(claim_id: int, data: dict) -> int:
                 ott, notes, check_id,
                 check_number, received_date, payer, payees_text, endorsed, void,
                 linked_escrow_id, inv_for, inv_vendor_id,
+                invoice_number,
                 proc_method, proc_fee_invoice_id,
                 created_at, updated_at)
            VALUES
@@ -711,6 +743,7 @@ def create_transaction(claim_id: int, data: dict) -> int:
                 :ott, :notes, :check_id,
                 :check_number, :received_date, :payer, :payees_text, :endorsed, :void,
                 :linked_escrow_id, :inv_for, :inv_vendor_id,
+                :invoice_number,
                 :proc_method, :proc_fee_invoice_id,
                 :now, :now)""",
         {
@@ -741,6 +774,7 @@ def create_transaction(claim_id: int, data: dict) -> int:
             "linked_escrow_id": data.get("linked_escrow_id") or None,
             "inv_for": data.get("inv_for") or "insured",
             "inv_vendor_id": data.get("inv_vendor_id") or None,
+            "invoice_number": data.get("invoice_number", "") or "",
             "proc_method": data.get("proc_method") or None,
             "proc_fee_invoice_id": data.get("proc_fee_invoice_id") or None,
             "now": now,
@@ -872,8 +906,9 @@ def get_transaction_summary(claim_id: int) -> dict:
             if t_type in (ESCROW_TYPE, "carrier", "escrow endorsed"):
                 s["total_fee_owed"] += t.get("disburse_fee_owed") or 0.0
             # fee_collected: money goes out via Draw, Carrier, or Escrow Endorsed
+            # Also include recouped fees (deferred fees taken back via check)
             if t_type in RELEASED_TYPES:
-                s["total_fee_collected"] += t.get("disburse_fee_collected") or 0.0
+                s["total_fee_collected"] += (t.get("disburse_fee_collected") or 0.0) + (t.get("disburse_fee_recouped") or 0.0)
             s["total_deferred"]      += t.get("disburse_fee_deferred") or 0.0
             # Use max of disbursement-level and transaction-level recouped: the latter is
             # auto-set by invoice payment side effects and may be non-zero even when
@@ -1330,9 +1365,9 @@ def get_disbursement_totals(tx_id: int) -> dict:
     row = _row(get_db(), """
         SELECT
             COALESCE(SUM(CASE WHEN recipient_type='insured'
-                THEN amount - fee_collected ELSE 0 END), 0) AS net_to_insured,
+                THEN amount - fee_owed + fee_deferred - fee_recouped ELSE 0 END), 0) AS net_to_insured,
             COALESCE(SUM(CASE WHEN recipient_type='vendor'
-                THEN amount ELSE 0 END), 0)                  AS to_vendors,
+                THEN amount - fee_owed + fee_deferred - fee_recouped ELSE 0 END), 0) AS to_vendors,
             COALESCE(SUM(fee_owed), 0)                       AS fee_owed,
             COALESCE(SUM(fee_collected), 0)                  AS fee_collected,
             COALESCE(SUM(fee_deferred), 0)                   AS fee_deferred,
@@ -1518,7 +1553,8 @@ def get_expenses(claim_id: int) -> list[dict]:
                COALESCE(p.total_paid,  0)  AS total_paid,
                COALESCE(r.reimbursed,  0)  AS reimbursed_amt,
                COALESCE(e.invoice_amount, 0) - COALESCE(p.total_paid, 0) AS outstanding_to_payee,
-               MAX(0, COALESCE(e.client_amount, 0) - COALESCE(p.client_paid, 0)) AS client_outstanding_amt,
+               MAX(0, COALESCE(e.client_amount, 0) - COALESCE(p.client_paid, 0)
+                 - COALESCE(r.reimbursed, 0)) AS client_outstanding_amt,
                MAX(0, COALESCE(e.wp_amount, 0) - COALESCE(p.wp_paid, 0)
                  - MAX(0, COALESCE(p.client_paid, 0) - COALESCE(e.client_amount, 0))) AS wp_outstanding_amt,
                -- WP fronted = how much WP paid beyond their own share
@@ -1563,7 +1599,8 @@ def get_expense(exp_id: int) -> dict | None:
                COALESCE(p.client_paid, 0)  AS client_paid,
                COALESCE(p.total_paid,  0)  AS total_paid,
                COALESCE(e.invoice_amount, 0) - COALESCE(p.total_paid, 0)  AS outstanding_to_payee,
-               MAX(0, COALESCE(e.client_amount, 0) - COALESCE(p.client_paid, 0)) AS client_outstanding_amt,
+               MAX(0, COALESCE(e.client_amount, 0) - COALESCE(p.client_paid, 0)
+                 - COALESCE(r.reimbursed, 0)) AS client_outstanding_amt,
                MAX(0, COALESCE(e.wp_amount, 0) - COALESCE(p.wp_paid, 0)
                  - MAX(0, COALESCE(p.client_paid, 0) - COALESCE(e.client_amount, 0))) AS wp_outstanding_amt,
                MAX(0, COALESCE(p.wp_paid, 0) - COALESCE(e.wp_amount, 0))  AS wp_fronted_amt,
@@ -1877,7 +1914,7 @@ def get_expense_totals(expense_id: int) -> dict:
         "client_paid":           client_paid,
         "total_paid":            total_paid,
         "wp_unpaid":             max(0.0, wp_amount - wp_paid - client_fronted_for_wp),
-        "client_unpaid":         max(0.0, client_amount - client_paid),
+        "client_unpaid":         max(0.0, client_amount - client_paid - reimbursed),
         "reimbursed":            reimbursed,
         "wp_fronted_for_client": wp_fronted_for_client,
         "reimburse_owed":        reimburse_owed,
@@ -1947,6 +1984,26 @@ def create_invoice_payment(tx_id: int, data: dict) -> int:
     get_db().commit()
     _apply_payment_side_effects(tx_id)
     return cur.lastrowid
+
+def update_invoice_payment(pid: int, data: dict) -> None:
+    get_db().execute(
+        """UPDATE invoice_payments SET date=?, amount=?, method=?, reference=?,
+                                       linked_tx_id=?, notes=?
+           WHERE id=?""",
+        (
+            data.get("date", "") or "",
+            _f(data.get("amount")),
+            data.get("method", "") or "",
+            data.get("reference", "") or "",
+            data.get("linked_tx_id") or None,
+            data.get("notes", "") or "",
+            pid,
+        ),
+    )
+    get_db().commit()
+    row = _row(get_db(), "SELECT transaction_id FROM invoice_payments WHERE id = ?", (pid,))
+    if row:
+        _apply_payment_side_effects(row["transaction_id"])
 
 def delete_invoice_payment(pid: int) -> None:
     row = _row(get_db(), "SELECT transaction_id FROM invoice_payments WHERE id = ?", (pid,))
@@ -2028,6 +2085,13 @@ def create_invoice_deferred_link(invoice_tx_id: int, deferred_tx_id: int) -> int
     )
     get_db().commit()
     return cur.lastrowid
+
+def update_invoice_deferred_link(link_id: int, deferred_tx_id: int) -> None:
+    get_db().execute(
+        "UPDATE invoice_deferred_links SET deferred_tx_id=? WHERE id=?",
+        (deferred_tx_id, link_id),
+    )
+    get_db().commit()
 
 def delete_invoice_deferred_link(link_id: int) -> None:
     get_db().execute("DELETE FROM invoice_deferred_links WHERE id = ?", (link_id,))

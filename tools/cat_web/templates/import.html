@@ -1,0 +1,432 @@
+{% extends "base.html" %}
+{% block title %}Import CAT File{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Import CAT File</h1>
+</div>
+
+{% if not parsed %}
+{# ===== Upload stage ===== #}
+<div class="section">
+  <p class="text-muted">Upload a CAT Excel (.xlsx) file to parse it into a structured review. You'll be able to edit, include, or exclude each item before committing to the database.</p>
+  <form method="POST" enctype="multipart/form-data" action="/import" class="import-upload-form">
+    <div class="form-group">
+      <label for="xlsx_file">CAT Excel File (.xlsx)</label>
+      <input type="file" id="xlsx_file" name="xlsx_file" accept=".xlsx" required>
+    </div>
+    <button type="submit" class="btn btn-primary">Parse File →</button>
+  </form>
+</div>
+
+{% else %}
+{# ===== Review stage ===== #}
+
+{% if parse_errors %}
+<div class="flash flash-warning">
+  <strong>Parse warnings ({{ parse_errors|length }}):</strong>
+  <ul class="import-warn-list">
+    {% for e in parse_errors %}<li>{{ e }}</li>{% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<div class="import-note">
+  <strong>Note:</strong> Fee fields (fee owed, collected, deferred, recouped) are set to $0 on import — fill them in on the claim page after importing.
+  Splits are auto-cloned from the assignees you approve below.
+</div>
+
+<form method="POST" action="/import/commit" id="import-review-form">
+
+{# ===== Claim Header ===== #}
+<section class="section">
+  <h2 class="section-title">Claim Header</h2>
+  <div class="form-grid form-grid-3">
+    <div class="form-group">
+      <label>Insured Name</label>
+      <input type="text" name="claim_insured_name" value="{{ parsed.claim.insured_name }}" required>
+    </div>
+    <div class="form-group">
+      <label>Carrier</label>
+      <input type="text" name="claim_carrier" value="{{ parsed.claim.carrier }}">
+    </div>
+    <div class="form-group">
+      <label>Contract %</label>
+      <input type="number" name="claim_contract_pct" value="{{ parsed.claim.contract_pct }}" step="0.01" min="0" max="100">
+    </div>
+    <div class="form-group">
+      <label>Job #</label>
+      <input type="text" name="claim_job_number" value="{{ parsed.claim.job_number }}">
+    </div>
+    <div class="form-group">
+      <label>Claim #</label>
+      <input type="text" name="claim_claim_number" value="{{ parsed.claim.claim_number }}">
+    </div>
+  </div>
+</section>
+
+{# ===== Policy Limits ===== #}
+<section class="section">
+  <h2 class="section-title">Policy Limits</h2>
+  <input type="hidden" name="limit_count" value="{{ parsed.limits|length }}">
+  {% if parsed.limits %}
+  <table class="table import-table">
+    <thead>
+      <tr>
+        <th class="col-check">Include</th>
+        <th>Coverage Type</th>
+        <th class="col-money">Base Limit</th>
+        <th class="col-money">Extended Limit</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for lim in parsed.limits %}
+      <tr>
+        <td class="col-check"><input type="checkbox" name="limit_{{ loop.index0 }}_include" checked></td>
+        <td><input type="text" name="limit_{{ loop.index0 }}_coverage_type" value="{{ lim.coverage_type }}" class="input-sm"></td>
+        <td><input type="number" name="limit_{{ loop.index0 }}_base_limit" value="{{ lim.base_limit }}" step="0.01" class="input-money"></td>
+        <td><input type="number" name="limit_{{ loop.index0 }}_extended_limit" value="{{ lim.extended_limit }}" step="0.01" class="input-money"></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="text-muted">No policy limits parsed. You can add them manually after import.</p>
+  {% endif %}
+</section>
+
+{# ===== Assignees (Fee Splits) ===== #}
+<section class="section">
+  <h2 class="section-title">Assignees (Fee Splits)</h2>
+  <p class="text-muted import-hint">These are cloned into every check and expense as payroll splits.</p>
+  <input type="hidden" name="assignee_count" value="{{ parsed.assignees|length }}">
+  {% if parsed.assignees %}
+  <table class="table import-table">
+    <thead>
+      <tr>
+        <th class="col-check">Include</th>
+        <th>Role</th>
+        <th>Name</th>
+        <th class="col-pct">Split %</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for a in parsed.assignees %}
+      <tr>
+        <td class="col-check"><input type="checkbox" name="assignee_{{ loop.index0 }}_include" checked></td>
+        <td>
+          <select name="assignee_{{ loop.index0 }}_role">
+            {% for role in assignee_roles %}
+            <option value="{{ role }}" {% if a.role == role %}selected{% endif %}>{{ role }}</option>
+            {% endfor %}
+          </select>
+        </td>
+        <td><input type="text" name="assignee_{{ loop.index0 }}_name" value="{{ a.name }}" class="input-sm"></td>
+        <td><input type="number" name="assignee_{{ loop.index0 }}_split_pct" value="{{ a.split_pct }}" step="0.01" class="input-pct"></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="text-muted">No assignees parsed. You can add them manually on the claim page after import.</p>
+  {% endif %}
+</section>
+
+{# ===== Checks / Transactions ===== #}
+<section class="section">
+  <h2 class="section-title">Checks ({{ parsed.transactions|length }})</h2>
+  <input type="hidden" name="tx_count" value="{{ parsed.transactions|length }}">
+
+  {# Vendor datalist for disbursements #}
+  <datalist id="vendor-list">
+    {% for v in vendors %}<option value="{{ v.name }}">{% endfor %}
+  </datalist>
+
+  {% if parsed.transactions %}
+    {% for tx in parsed.transactions %}
+    {% set i = loop.index0 %}
+    <details class="import-check-block" open>
+      <summary class="import-check-summary">
+        <label class="import-include-label" onclick="event.stopPropagation()">
+          <input type="checkbox" name="tx_{{ i }}_include" checked onclick="event.stopPropagation()">
+        </label>
+        <span class="badge badge-{{ tx.type|lower|replace(' ', '-') }}">{{ tx.type }}</span>
+        <span class="import-check-num">{{ tx.check_number or '(no #)' }}</span>
+        <span class="import-check-date">{{ tx.check_date or tx.received_date or '' }}</span>
+        <span class="import-check-amt">${{ "%.2f"|format(tx.amount|float) }}</span>
+        {% if tx.parse_warnings %}
+        <span class="import-warn-badge">⚠ {{ tx.parse_warnings|length }} warning{{ 's' if tx.parse_warnings|length != 1 }}</span>
+        {% endif %}
+      </summary>
+
+      {% if tx.parse_warnings %}
+      <div class="import-warn-inline">
+        {% for w in tx.parse_warnings %}⚠ {{ w }}<br>{% endfor %}
+      </div>
+      {% endif %}
+
+      <input type="hidden" name="tx_{{ i }}_seq" value="{{ tx.seq }}">
+
+      {% if tx.type == "Fee Invoice" %}
+      {# ===== Fee Invoice fields ===== #}
+      <input type="hidden" name="tx_{{ i }}_type" value="Fee Invoice">
+      <input type="hidden" name="tx_{{ i }}_cov_count" value="0">
+      <input type="hidden" name="tx_{{ i }}_disb_count" value="0">
+
+      <div class="import-check-grid">
+        <div class="form-group">
+          <label>Invoice #</label>
+          <input type="text" name="tx_{{ i }}_invoice_number" value="{{ tx.invoice_number }}">
+        </div>
+        <div class="form-group">
+          <label>Invoice Date</label>
+          <input type="date" name="tx_{{ i }}_check_date" value="{{ tx.check_date or '' }}">
+        </div>
+        <div class="form-group">
+          <label>Invoice Amount</label>
+          <input type="number" name="tx_{{ i }}_amount" value="{{ tx.amount }}" step="0.01">
+        </div>
+        <div class="form-group">
+          <label>Insured / Payer</label>
+          <input type="text" name="tx_{{ i }}_payer" value="{{ tx.payer }}">
+        </div>
+      </div>
+
+      {% if tx.payment %}
+      <h4 class="import-sub-heading">Payment Received</h4>
+      <div class="import-check-grid">
+        <div class="form-group">
+          <label><input type="checkbox" name="tx_{{ i }}_pay_include" checked style="margin-right:4px">Include payment</label>
+        </div>
+        <div class="form-group">
+          <label>Payment Date</label>
+          <input type="date" name="tx_{{ i }}_received_date" value="{{ tx.payment.date or '' }}">
+        </div>
+        <div class="form-group">
+          <label>Payment Amount</label>
+          <input type="number" name="tx_{{ i }}_pay_amount" value="{{ tx.payment.amount }}" step="0.01" class="input-money">
+        </div>
+        <div class="form-group">
+          <label>Reference (Tx #)</label>
+          <input type="text" name="tx_{{ i }}_pay_reference" value="{{ tx.payment.reference }}">
+        </div>
+      </div>
+      {% else %}
+      <input type="hidden" name="tx_{{ i }}_received_date" value="">
+      {% endif %}
+
+      {# Fee Invoice splits (read-only) #}
+      {% if tx.splits %}
+      <h4 class="import-sub-heading">Splits (read-only — from file)</h4>
+      <table class="table import-sub-table import-splits-display">
+        <thead>
+          <tr><th>Role</th><th>Name</th><th class="col-pct">%</th></tr>
+        </thead>
+        <tbody>
+          {% for sp in tx.splits %}
+          <tr>
+            <td>{{ sp.role }}</td>
+            <td>{{ sp.name }}</td>
+            <td>{{ sp.split_pct }}%</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p class="text-muted import-hint">Actual payroll splits will be cloned from the Assignees section above.</p>
+      {% endif %}
+
+      {% else %}
+      {# ===== Regular check fields ===== #}
+
+      {# Check info #}
+      <div class="import-check-grid">
+        <div class="form-group">
+          <label>Type</label>
+          <select name="tx_{{ i }}_type">
+            {% for tt in tx_types %}
+            <option value="{{ tt }}" {% if tx.type == tt %}selected{% endif %}>{{ tt }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Check #</label>
+          <input type="text" name="tx_{{ i }}_check_number" value="{{ tx.check_number }}">
+        </div>
+        <div class="form-group">
+          <label>Received Date</label>
+          <input type="date" name="tx_{{ i }}_received_date" value="{{ tx.received_date or '' }}">
+        </div>
+        <div class="form-group">
+          <label>Check Date</label>
+          <input type="date" name="tx_{{ i }}_check_date" value="{{ tx.check_date or '' }}">
+        </div>
+        <div class="form-group">
+          <label>Amount</label>
+          <input type="number" name="tx_{{ i }}_amount" value="{{ tx.amount }}" step="0.01">
+        </div>
+        <div class="form-group">
+          <label>Payer</label>
+          <input type="text" name="tx_{{ i }}_payer" value="{{ tx.payer }}">
+        </div>
+        <div class="form-group">
+          <label>Payees</label>
+          <input type="text" name="tx_{{ i }}_payees_text" value="{{ tx.payees_text }}">
+        </div>
+      </div>
+
+      {# Coverage allocations #}
+      <input type="hidden" name="tx_{{ i }}_cov_count" value="{{ tx.coverages|length }}">
+      {% if tx.coverages %}
+      <h4 class="import-sub-heading">Coverage Allocations</h4>
+      <table class="table import-sub-table">
+        <thead>
+          <tr>
+            <th class="col-check">Include</th>
+            <th>Coverage</th>
+            <th class="col-money">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for cov in tx.coverages %}
+          {% set j = loop.index0 %}
+          <tr>
+            <td class="col-check"><input type="checkbox" name="tx_{{ i }}_cov_{{ j }}_include" checked></td>
+            <td><input type="text" name="tx_{{ i }}_cov_{{ j }}_coverage_type" value="{{ cov.coverage_type }}" class="input-sm"></td>
+            <td><input type="number" name="tx_{{ i }}_cov_{{ j }}_amount" value="{{ cov.amount }}" step="0.01" class="input-money"></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+
+      {# Disbursements #}
+      <input type="hidden" name="tx_{{ i }}_disb_count" value="{{ tx.disbursements|length }}">
+      {% if tx.disbursements %}
+      <h4 class="import-sub-heading">Disbursements (PAY TO)</h4>
+      <table class="table import-sub-table">
+        <thead>
+          <tr>
+            <th class="col-check">Include</th>
+            <th>Type</th>
+            <th>Recipient</th>
+            <th class="col-money">Amount</th>
+            <th class="col-pct">Fee %</th>
+            <th class="col-money">Fee Owed</th>
+            <th class="col-money">Collected</th>
+            <th class="col-money">Deferred</th>
+            <th class="col-money">Recouped</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for disb in tx.disbursements %}
+          {% set j = loop.index0 %}
+          <tr>
+            <td class="col-check"><input type="checkbox" name="tx_{{ i }}_disb_{{ j }}_include" checked></td>
+            <td>
+              <select name="tx_{{ i }}_disb_{{ j }}_recipient_type">
+                <option value="insured" {% if disb.recipient_type == 'insured' %}selected{% endif %}>Insured</option>
+                <option value="vendor" {% if disb.recipient_type == 'vendor' %}selected{% endif %}>Vendor</option>
+              </select>
+            </td>
+            <td>
+              <input type="text" name="tx_{{ i }}_disb_{{ j }}_recipient_name"
+                     value="{{ disb.recipient_name }}"
+                     list="vendor-list" class="input-md">
+              <input type="hidden" name="tx_{{ i }}_disb_{{ j }}_vendor_id" value="">
+            </td>
+            <td><input type="number" name="tx_{{ i }}_disb_{{ j }}_amount" value="{{ disb.amount }}" step="0.01" class="input-money"></td>
+            <td><input type="number" name="tx_{{ i }}_disb_{{ j }}_fee_pct" value="{{ disb.fee_pct or '' }}" step="0.01" class="input-pct" placeholder="—"></td>
+            <td><input type="number" name="tx_{{ i }}_disb_{{ j }}_fee_owed" value="{{ disb.fee_owed or '' }}" step="0.01" class="input-money"></td>
+            <td><input type="number" name="tx_{{ i }}_disb_{{ j }}_fee_collected" value="{{ disb.fee_collected or '' }}" step="0.01" class="input-money"></td>
+            <td><input type="number" name="tx_{{ i }}_disb_{{ j }}_fee_deferred" value="{{ disb.fee_deferred or '' }}" step="0.01" class="input-money"></td>
+            <td><input type="number" name="tx_{{ i }}_disb_{{ j }}_fee_recouped" value="{{ disb.fee_recouped or '' }}" step="0.01" class="input-money"></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+
+      {# Splits (read-only display) #}
+      {% if tx.splits %}
+      <h4 class="import-sub-heading">Splits (read-only — from file)</h4>
+      <table class="table import-sub-table import-splits-display">
+        <thead>
+          <tr><th>Role</th><th>Name</th><th class="col-pct">%</th></tr>
+        </thead>
+        <tbody>
+          {% for sp in tx.splits %}
+          <tr>
+            <td>{{ sp.role }}</td>
+            <td>{{ sp.name }}</td>
+            <td>{{ sp.split_pct }}%</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p class="text-muted import-hint">Actual payroll splits will be cloned from the Assignees section above.</p>
+      {% endif %}
+
+      {% endif %}{# end if tx.type == "Fee Invoice" #}
+
+    </details>
+    {% endfor %}
+  {% else %}
+  <p class="text-muted">No transaction sheets found.</p>
+  {% endif %}
+</section>
+
+{# ===== Expenses ===== #}
+<section class="section">
+  <h2 class="section-title">Expenses ({{ parsed.expenses|length }})</h2>
+  <input type="hidden" name="exp_count" value="{{ parsed.expenses|length }}">
+  {% if parsed.expenses %}
+  <table class="table import-table">
+    <thead>
+      <tr>
+        <th class="col-check">Include</th>
+        <th>Invoice Date</th>
+        <th>Payee</th>
+        <th class="col-money">Amount</th>
+        <th>Reason</th>
+        <th>Responsible Party</th>
+        <th>Invoice #</th>
+        <th class="col-money">Client $</th>
+        <th class="col-money">WP $</th>
+        <th class="col-money">Client Paid</th>
+        <th class="col-money">WP Paid</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for exp in parsed.expenses %}
+      {% set i = loop.index0 %}
+      <tr {% if exp.parse_warnings %}class="import-row-warn"{% endif %}>
+        <td class="col-check"><input type="checkbox" name="exp_{{ i }}_include" checked></td>
+        <td><input type="date" name="exp_{{ i }}_invoice_date" value="{{ exp.invoice_date or '' }}" class="input-date"></td>
+        <td><input type="text" name="exp_{{ i }}_payee_name" value="{{ exp.payee_name }}" class="input-sm"></td>
+        <td><input type="number" name="exp_{{ i }}_invoice_amount" value="{{ exp.invoice_amount }}" step="0.01" class="input-money"></td>
+        <td><input type="text" name="exp_{{ i }}_reason" value="{{ exp.reason }}" class="input-md"></td>
+        <td><input type="text" name="exp_{{ i }}_responsible_party" value="{{ exp.responsible_party }}" class="input-sm"></td>
+        <td><input type="text" name="exp_{{ i }}_invoice_number" value="{{ exp.invoice_number }}" class="input-sm"></td>
+        <td><input type="number" name="exp_{{ i }}_client_amount" value="{{ exp.client_amount or 0 }}" step="0.01" class="input-money"></td>
+        <td><input type="number" name="exp_{{ i }}_wp_amount" value="{{ exp.wp_amount or 0 }}" step="0.01" class="input-money"></td>
+        <td><input type="number" name="exp_{{ i }}_client_paid" value="{{ exp.client_paid or '' }}" step="0.01" class="input-money" placeholder="0"></td>
+        <td><input type="number" name="exp_{{ i }}_wp_paid" value="{{ exp.wp_paid or '' }}" step="0.01" class="input-money" placeholder="0"></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="text-muted">No expense sheets found.</p>
+  {% endif %}
+</section>
+
+{# ===== Submit bar ===== #}
+<div class="import-submit-bar">
+  <button type="submit" class="btn btn-primary">Import Approved Items →</button>
+  <a href="{{ url_for('import_page') }}" class="btn btn-secondary" onclick="return confirm('Discard this import and start over?')">Start Over</a>
+</div>
+
+</form>
+{% endif %}
+
+{% endblock %}

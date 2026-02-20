@@ -42,32 +42,24 @@
 
   {# Status badge #}
   <td>
-    {% if ep <= 0.005 and ro <= 0.005 and wro <= 0.005 and (wa <= 0.005 or cf > 0.005) and (exp.invoice_amount or 0) > 0 %}
+    {% if c_amt <= 0.005 and w_amt <= 0.005 and (exp.invoice_amount or 0) > 0 %}
+      <span class="badge-pill" style="background:#f3f4f6;color:#6b7280">Unassigned</span>
+    {% elif ep <= 0.005 and ro <= 0.005 and wro <= 0.005 and (wa <= 0.005 or cf > 0.005) and (exp.invoice_amount or 0) > 0 %}
       <span class="badge-pill" style="background:#d1fae5;color:#065f46">Paid</span>
     {% elif ep <= 0.005 and ro > 0.005 %}
       <span class="badge-pill" style="background:#fef3c7;color:#92400e">WP Fronted · Client Owes WP</span>
-    {% elif wf > 0.005 and ca > 0.005 %}
-      <span class="badge-pill" style="background:#fef3c7;color:#92400e">WP Fronted · Client Outstanding</span>
     {% elif ep <= 0.005 and wro > 0.005 %}
       <span class="badge-pill" style="background:#dbeafe;color:#1e40af">Client Fronted · WP Owes Client</span>
-    {% elif cf > 0.005 and wa > 0.005 and ep > 0.005 %}
-      <span class="badge-pill" style="background:#dbeafe;color:#1e40af">Client Fronted · WP Outstanding</span>
-    {% elif ca > 0.005 and wa <= 0.005 %}
-      {% if any_paid %}
-        <span class="badge-pill" style="background:#fef3c7;color:#92400e">WP Paid · Client Outstanding</span>
-      {% else %}
-        <span class="badge-pill" style="background:#fee2e2;color:#991b1b">Client Outstanding</span>
-      {% endif %}
-    {% elif wa > 0.005 and ca <= 0.005 %}
-      {% if any_paid %}
-        <span class="badge-pill" style="background:#fef3c7;color:#92400e">Client Paid · WP Outstanding</span>
-      {% else %}
-        <span class="badge-pill" style="background:#fee2e2;color:#991b1b">WP Outstanding</span>
-      {% endif %}
-    {% elif ca > 0.005 and wa > 0.005 %}
-      <span class="badge-pill" style="background:#fee2e2;color:#991b1b">Unpaid</span>
     {% elif ep > 0.005 %}
-      <span class="badge-pill" style="background:#f3f4f6;color:#6b7280">Unpaid</span>
+      {% if exp_type == 'client' %}
+        <span class="badge-pill" style="background:#fee2e2;color:#991b1b">Payee Unpaid · Client Expense</span>
+      {% elif exp_type == 'wp' %}
+        <span class="badge-pill" style="background:#fee2e2;color:#991b1b">Payee Unpaid · WP Expense</span>
+      {% elif exp_type == 'split' %}
+        <span class="badge-pill" style="background:#fee2e2;color:#991b1b">Payee Unpaid · Split Expense</span>
+      {% else %}
+        <span class="badge-pill" style="background:#fee2e2;color:#991b1b">Payee Unpaid</span>
+      {% endif %}
     {% else %}
       <span class="text-muted">—</span>
     {% endif %}

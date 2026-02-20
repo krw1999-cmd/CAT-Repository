@@ -44,7 +44,7 @@
     </datalist>
     <input type="hidden" name="vendor_id" id="vid-{{ form_id }}"
            form="{{ form_id }}"
-           value="{{ d.vendor_id if d else '' }}">
+           value="{{ d.vendor_id or '' }}">
   </td>
   <td>
     <input name="amount" type="number" step="0.01" class="input-sm input-num"
@@ -53,7 +53,8 @@
   </td>
   <td class="text-center">
     <input name="fee_applies" type="checkbox" value="1" form="{{ form_id }}"
-           {% if d is none or d.fee_applies %}checked{% endif %}
+           {% if d is none %}{% if (claim.contract_pct or 0) > 0 %}checked{% endif %}
+           {% elif d.fee_applies %}checked{% endif %}
            onchange="toggleFeeFields(this, '{{ form_id }}')">
   </td>
   <td>
@@ -78,8 +79,13 @@
            value="{{ '%.2f'|format(d.fee_deferred) if d else '' }}" form="{{ form_id }}">
   </td>
   <td>
-    <input name="fee_recouped" type="number" step="0.01" class="input-sm input-num"
-           value="{{ '%.2f'|format(d.fee_recouped) if d else '' }}" form="{{ form_id }}">
+    {% if tx.has_linked_invoice %}
+      <span class="text-muted text-small">via invoice</span>
+      <input name="fee_recouped" type="hidden" value="0" form="{{ form_id }}">
+    {% else %}
+      <input name="fee_recouped" type="number" step="0.01" class="input-sm input-num"
+             value="{{ '%.2f'|format(d.fee_recouped) if d else '' }}" form="{{ form_id }}">
+    {% endif %}
   </td>
   <td>
     <input name="notes" type="text" class="input-sm"
@@ -87,7 +93,8 @@
            value="{{ d.notes if d else '' }}" form="{{ form_id }}">
   </td>
   <td class="actions-col nowrap">
-    <button class="btn btn-primary btn-sm" form="{{ form_id }}" type="submit">Save</button>
+    <button class="btn btn-primary btn-sm" type="button"
+            onclick="disbSave('{{ form_id }}', '{{ save_method }}', '{{ save_url }}', '{{ row_id }}')">Save</button>
     {% if is_new %}
     <button type="button" class="btn btn-ghost btn-sm"
             onclick="document.getElementById('disburse-new-row-placeholder').outerHTML='<tr id=&quot;disburse-new-row-placeholder&quot;></tr>'">✕</button>
@@ -102,90 +109,15 @@
 
 <script>
 (function() {
-  const f = document.createElement('form');
-  f.id = '{{ form_id }}';
-  f.setAttribute('hx-{{ save_method }}', '{{ save_url }}');
-  f.setAttribute('hx-target', '#{{ row_id }}');
-  f.setAttribute('hx-swap', 'outerHTML');
-  f.style.display = 'none';
-  document.body.appendChild(f);
-  htmx.process(f);
-
-  // Build vendor name→id lookup for this form
+  // Per-row vendor lookup (used by onVendorInput)
   window['VENDOR_MAP_{{ form_id }}'] = {
     {% for v in vendors %}"{{ v.name | replace('"', '\\"') }}": {{ v.id }},
     {% endfor %}
   };
-
-  // Init: auto-fill insured name if new insured row
-  const typeSelect = document.querySelector('[form="{{ form_id }}"][name="recipient_type"]');
-  if (typeSelect) toggleVendorField(typeSelect, '{{ form_id }}', true);
+  // Init vendor/insured field visibility
+  var typeSelect = document.querySelector('[form="{{ form_id }}"][name="recipient_type"]');
+  if (typeSelect && window.toggleVendorField) toggleVendorField(typeSelect, '{{ form_id }}', true);
+  // Auto-uncheck fee_applies if effective pct is 0
+  if (window.calcDisburseFeePct) calcDisburseFeePct(null, '{{ form_id }}');
 })();
-
-function toggleVendorField(sel, fid, isInit) {
-  const insuredInput = document.getElementById('rname-' + fid);
-  const vendorInput  = document.getElementById('vendor-ac-' + fid);
-  const isVendor = sel.value === 'vendor';
-
-  if (insuredInput) {
-    insuredInput.disabled = isVendor;
-    insuredInput.style.display = isVendor ? 'none' : '';
-  }
-  if (vendorInput) {
-    vendorInput.disabled = !isVendor;
-    vendorInput.style.display = isVendor ? '' : 'none';
-  }
-
-  // Auto-fill insured name from row data attribute
-  if (!isVendor && insuredInput) {
-    const row = sel.closest('tr');
-    const insuredName = row ? row.dataset.insuredName : '';
-    if (insuredName && (isInit ? !insuredInput.value : true)) {
-      insuredInput.value = insuredName;
-    }
-  }
-}
-
-function onVendorInput(input, fid) {
-  const val = input.value.trim();
-  const map = window['VENDOR_MAP_' + fid];
-  const vidField = document.getElementById('vid-' + fid);
-  if (!vidField || !map) return;
-
-  if (val === '') {
-    vidField.value = '';
-    input.setCustomValidity('');
-    return;
-  }
-
-  // Exact match (case-sensitive — vendor names are stored as-is)
-  const id = map[val];
-  if (id !== undefined) {
-    vidField.value = id;
-    input.setCustomValidity('');
-  } else {
-    vidField.value = '';
-    input.setCustomValidity('Please select a vendor from the list.');
-    input.reportValidity();
-  }
-}
-
-function calcDisburseFeePct(input, fid) {
-  const form = document.getElementById(fid);
-  if (!form) return;
-  const amtInput = document.querySelector('[form="' + fid + '"][name="amount"]');
-  const pctInput = document.getElementById('fpct-' + fid);
-  const owedInput = document.getElementById('fowed-' + fid);
-  if (!amtInput || !owedInput) return;
-  const amt = parseFloat(amtInput.value) || 0;
-  const pctVal = pctInput && pctInput.value !== '' ? parseFloat(pctInput.value) : {{ claim.contract_pct or 0 }};
-  owedInput.value = (amt * pctVal / 100).toFixed(2);
-  if (pctInput && parseFloat(pctInput.value) > 0) {
-    const cb = document.querySelector('[form="' + fid + '"][name="fee_applies"]');
-    if (cb && !cb.checked) {
-      cb.checked = true;
-      toggleFeeFields(cb, fid);
-    }
-  }
-}
 </script>

@@ -110,7 +110,7 @@
           <th class="num">Amount</th>
           <th>Status</th>
           <th class="num">Net to Insured</th>
-          <th class="num">To Vendors</th>
+          <th class="num">Net to Vendors</th>
           <th class="num">Fee Owed</th>
           <th class="num">Fee Coll.</th>
           <th class="num">Deferred</th>
@@ -176,4 +176,12 @@
   </button>
 </section>
 
+{% endblock %}
+
+{% block scripts %}
+<script>
+  window.addEventListener('pageshow', function(e) {
+    if (e.persisted) window.location.reload();
+  });
+</script>
 {% endblock %}

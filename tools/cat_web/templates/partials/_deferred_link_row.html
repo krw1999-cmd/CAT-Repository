@@ -9,6 +9,11 @@
   <td class="num">{{ (link.amount or 0) | money }}</td>
   <td class="num">{{ (link.deferred or 0) | money }}</td>
   <td class="actions-col">
+    <button class="btn-icon"
+            hx-get="{{ url_for('deferred_link_edit_row', claim_id=claim.id, tx_id=tx.id, lid=link.id) }}"
+            hx-target="#deferred-link-{{ link.id }}"
+            hx-swap="outerHTML"
+            title="Edit">✎</button>
     <button class="btn-icon btn-icon-danger"
             hx-delete="{{ url_for('deferred_link_delete', claim_id=claim.id, tx_id=tx.id, lid=link.id) }}"
             hx-target="#deferred-link-{{ link.id }}"

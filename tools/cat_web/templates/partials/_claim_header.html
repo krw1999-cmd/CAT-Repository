@@ -8,6 +8,12 @@
       <span class="label">Carrier</span>
       <span class="value">{{ claim.carrier or '—' }}</span>
     </div>
+    {% if claim.mortgage_company %}
+    <div class="header-field">
+      <span class="label">Mortgage Co.</span>
+      <span class="value">{{ claim.mortgage_company }}</span>
+    </div>
+    {% endif %}
     <div class="header-field">
       <span class="label">Contract %</span>
       <span class="value">{{ "%.2f"|format(claim.contract_pct or 0) }}%</span>
@@ -40,6 +46,9 @@
     </div>
     {% endif %}
   </div>
+  {% if claim.notes %}
+  <div style="margin-top:8px; padding-top:8px; border-top:1px solid var(--border); font-size:13px; color:var(--text-muted); white-space:pre-wrap">{{ claim.notes }}</div>
+  {% endif %}
   <div class="header-actions">
     <button class="btn btn-ghost btn-sm"
             hx-get="{{ url_for('claim_header_edit', claim_id=claim.id) }}"

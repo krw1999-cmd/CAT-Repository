@@ -15,6 +15,11 @@
   <td class="text-small">{{ p.reference if p.reference else '—' }}</td>
   <td class="text-small text-muted">{% if p.linked_tx_id and p.linked_tx_seq %}#{{ p.linked_tx_seq }}{% else %}—{% endif %}</td>
   <td class="actions-col">
+    <button class="btn-icon"
+            hx-get="{{ url_for('payment_edit_row', claim_id=claim.id, tx_id=tx.id, pid=p.id) }}"
+            hx-target="#inv-pay-{{ p.id }}"
+            hx-swap="outerHTML"
+            title="Edit">✎</button>
     <button class="btn-icon btn-icon-danger"
             hx-delete="{{ url_for('payment_delete', claim_id=claim.id, tx_id=tx.id, pid=p.id) }}"
             hx-target="#inv-pay-{{ p.id }}"

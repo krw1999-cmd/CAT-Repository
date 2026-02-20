@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import csv
 import io
+import json
+import os
+import uuid
 from datetime import date, timedelta
 
 from flask import (
@@ -14,6 +17,7 @@ from flask import (
     redirect,
     render_template,
     request,
+    session,
     url_for,
     flash,
     abort,
@@ -125,7 +129,7 @@ def claim_detail(claim_id: int):
         open_escrows=open_escrows,
         coverage_pivot=coverage_pivot,
         tx_types=TRANSACTION_TYPES,
-        coverage_types=db_module.get_coverage_types(),
+        coverage_types=db_module.get_claim_coverage_types(claim_id),
     )
 
 
@@ -161,6 +165,8 @@ def claim_header_save(claim_id: int):
         "insured_name": request.form.get("insured_name", "").strip(),
         "carrier": request.form.get("carrier", "").strip(),
         "contract_pct": db_module._f(request.form.get("contract_pct")),
+        "mortgage_company": request.form.get("mortgage_company", "").strip() or None,
+        "notes": request.form.get("notes", "").strip() or None,
         "proc_method_carrier": request.form.get("proc_method_carrier") or None,
         "proc_method_draw":    request.form.get("proc_method_draw") or None,
         "proc_method_escrow":  request.form.get("proc_method_escrow") or None,
@@ -181,7 +187,7 @@ def limit_new_row(claim_id: int):
     return render_template("partials/_limit_edit.html",
                            claim=claim,
                            limit=None,
-                           coverage_types=db_module.get_coverage_types())
+                           coverage_types=db_module.get_claim_coverage_types(claim_id))
 
 
 @app.route("/claims/<int:claim_id>/limits", methods=["POST"])
@@ -207,7 +213,7 @@ def limit_edit_row(claim_id: int, limit_id: int):
     return render_template("partials/_limit_edit.html",
                            claim=claim,
                            limit=limit,
-                           coverage_types=db_module.get_coverage_types())
+                           coverage_types=db_module.get_claim_coverage_types(claim_id))
 
 
 @app.route("/claims/<int:claim_id>/limits/<int:limit_id>", methods=["PUT"])
@@ -958,7 +964,7 @@ def tx_detail(claim_id: int, tx_id: int):
         invoice_deferred_links=invoice_deferred_links,
         claim_txs_for_select=claim_txs_for_select,
         roles=ASSIGNEE_ROLES,
-        coverage_types=db_module.get_coverage_types(),
+        coverage_types=db_module.get_claim_coverage_types(claim_id),
         tx_types=TRANSACTION_TYPES,
         tx_status=tx_status,
         tx_status_css=_TX_STATUS_CSS[tx_status],
@@ -1020,10 +1026,11 @@ def tx_info_save(claim_id: int, tx_id: int):
     db_module.update_transaction(tx_id, data)
     tx = db_module.get_transaction(tx_id)
     claim = db_module.get_claim(claim_id)
-    return render_template("partials/_tx_info.html", claim=claim, tx=tx,
-                           tx_types=TRANSACTION_TYPES,
-                           vendors=db_module.get_all_vendors(),
-                           fee_invoices=db_module.get_fee_invoices(claim_id))
+    info_html = render_template("partials/_tx_info.html", claim=claim, tx=tx,
+                                tx_types=TRANSACTION_TYPES,
+                                vendors=db_module.get_all_vendors(),
+                                fee_invoices=db_module.get_fee_invoices(claim_id))
+    return info_html + _check_status_oob(tx_id)
 
 
 # ---------------------------------------------------------------------------
@@ -1233,12 +1240,15 @@ def coverage_new_row(claim_id: int, tx_id: int):
     tx = db_module.get_transaction(tx_id)
     return render_template("partials/_coverage_edit.html",
                            claim=claim, tx=tx, cov=None,
-                           coverage_types=db_module.get_coverage_types())
+                           coverage_types=db_module.get_claim_coverage_types(claim_id))
 
 @app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/coverage", methods=["POST"])
 @login_required
 def coverage_create(claim_id: int, tx_id: int):
     data = _coverage_data_from_form()
+    allowed = db_module.get_claim_coverage_types(claim_id)
+    if data["coverage_type"] not in allowed:
+        abort(400)
     db_module.ensure_coverage_type(data["coverage_type"])
     cid = db_module.create_coverage(tx_id, data)
     cov = db_module.get_coverage(cid)
@@ -1246,7 +1256,7 @@ def coverage_create(claim_id: int, tx_id: int):
     tx = db_module.get_transaction(tx_id)
     row_html = render_template("partials/_coverage_row.html",
                                claim=claim, tx=tx, cov=cov,
-                               coverage_types=db_module.get_coverage_types())
+                               coverage_types=db_module.get_claim_coverage_types(claim_id))
     placeholder = '<tr id="coverage-new-row-placeholder"></tr>'
     return row_html + placeholder + _coverage_total_oob(tx_id)
 
@@ -1260,12 +1270,15 @@ def coverage_edit_row(claim_id: int, tx_id: int, cid: int):
         abort(404)
     return render_template("partials/_coverage_edit.html",
                            claim=claim, tx=tx, cov=cov,
-                           coverage_types=db_module.get_coverage_types())
+                           coverage_types=db_module.get_claim_coverage_types(claim_id))
 
 @app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/coverage/<int:cid>", methods=["PUT"])
 @login_required
 def coverage_update(claim_id: int, tx_id: int, cid: int):
     data = _coverage_data_from_form()
+    allowed = db_module.get_claim_coverage_types(claim_id)
+    if data["coverage_type"] not in allowed:
+        abort(400)
     db_module.ensure_coverage_type(data["coverage_type"])
     db_module.update_coverage(cid, data)
     cov = db_module.get_coverage(cid)
@@ -1273,7 +1286,7 @@ def coverage_update(claim_id: int, tx_id: int, cid: int):
     tx = db_module.get_transaction(tx_id)
     row_html = render_template("partials/_coverage_row.html",
                                claim=claim, tx=tx, cov=cov,
-                               coverage_types=db_module.get_coverage_types())
+                               coverage_types=db_module.get_claim_coverage_types(claim_id))
     return row_html + _coverage_total_oob(tx_id)
 
 @app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/coverage/<int:cid>", methods=["DELETE"])
@@ -1292,7 +1305,7 @@ def coverage_view_row(claim_id: int, tx_id: int, cid: int):
         abort(404)
     return render_template("partials/_coverage_row.html",
                            claim=claim, tx=tx, cov=cov,
-                           coverage_types=db_module.get_coverage_types())
+                           coverage_types=db_module.get_claim_coverage_types(claim_id))
 
 def _coverage_data_from_form() -> dict:
     return {
@@ -1428,9 +1441,10 @@ def disbursement_toggle_fee(claim_id: int, tx_id: int, did: int):
     if not d:
         abort(404)
     data = dict(d)
-    already_collected = (d.get("fee_collected") or 0) >= (d.get("fee_owed") or 0) > 0
-    data["fee_collected"] = 0 if already_collected else (d.get("fee_owed") or 0)
-    data["fee_deferred"] = 0
+    fee_collectable = (d.get("fee_owed") or 0) - (d.get("fee_deferred") or 0)
+    already_collected = fee_collectable > 0 and (d.get("fee_collected") or 0) >= fee_collectable - 0.005
+    data["fee_collected"] = 0 if already_collected else fee_collectable
+    # leave fee_deferred unchanged
     db_module.update_disbursement(did, data)
     claim = db_module.get_claim(claim_id)
     tx = db_module.get_transaction(tx_id)
@@ -1441,18 +1455,28 @@ def disbursement_toggle_fee(claim_id: int, tx_id: int, did: int):
     return row_html + _disburse_totals_oob(tx_id, claim) + _check_status_oob(tx_id)
 
 
+def _parse_int_or_none(val) -> int | None:
+    """Return int if val is a non-empty digit string, else None."""
+    if val and str(val).strip().lstrip('-').isdigit():
+        return int(val)
+    return None
+
+
 def _disbursement_data_from_form() -> dict:
     fee_applies_raw = request.form.get("fee_applies")
-    # checkbox: present = checked
     fee_applies = fee_applies_raw is not None and fee_applies_raw != "0"
+    fee_pct = db_module._fopt(request.form.get("fee_pct"))
+    # If the effective pct is 0, fee cannot apply
+    if fee_pct is not None and fee_pct == 0:
+        fee_applies = False
     return {
         "sort_order":     request.form.get("sort_order", 0),
         "recipient_type": request.form.get("recipient_type", "insured"),
-        "vendor_id":      request.form.get("vendor_id") or None,
+        "vendor_id":      _parse_int_or_none(request.form.get("vendor_id")),
         "recipient_name": request.form.get("recipient_name", "").strip(),
         "amount":         db_module._f(request.form.get("amount")),
         "fee_applies":    fee_applies,
-        "fee_pct":        db_module._fopt(request.form.get("fee_pct")),
+        "fee_pct":        fee_pct,
         "fee_owed":       db_module._f(request.form.get("fee_owed")),
         "fee_collected":  db_module._f(request.form.get("fee_collected")),
         "fee_deferred":   db_module._f(request.form.get("fee_deferred")),
@@ -2009,6 +2033,53 @@ def payment_create(claim_id: int, tx_id: int):
     return row_html + placeholder + _inv_amounts_oob(tx_id, tx)
 
 
+@app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/payments/<int:pid>/edit")
+@login_required
+def payment_edit_row(claim_id: int, tx_id: int, pid: int):
+    claim = db_module.get_claim(claim_id)
+    tx = db_module.get_transaction(tx_id)
+    payments = db_module.get_invoice_payments(tx_id)
+    p = next((x for x in payments if x["id"] == pid), None)
+    if not p:
+        abort(404)
+    claim_txs_for_select = db_module.get_claim_transactions_for_select(claim_id, exclude_tx_id=tx_id)
+    return render_template("partials/_inv_pay_edit.html",
+                           claim=claim, tx=tx, p=p,
+                           claim_txs_for_select=claim_txs_for_select)
+
+
+@app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/payments/<int:pid>/view")
+@login_required
+def payment_view_row(claim_id: int, tx_id: int, pid: int):
+    claim = db_module.get_claim(claim_id)
+    tx = db_module.get_transaction(tx_id)
+    payments = db_module.get_invoice_payments(tx_id)
+    p = next((x for x in payments if x["id"] == pid), None)
+    if not p:
+        abort(404)
+    return render_template("partials/_inv_pay_row.html", claim=claim, tx=tx, p=p)
+
+
+@app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/payments/<int:pid>", methods=["PUT"])
+@login_required
+def payment_update(claim_id: int, tx_id: int, pid: int):
+    data = {
+        "date":         request.form.get("date", "").strip(),
+        "amount":       db_module._f(request.form.get("amount")),
+        "method":       request.form.get("method", "").strip(),
+        "reference":    request.form.get("reference", "").strip(),
+        "linked_tx_id": request.form.get("linked_tx_id") or None,
+        "notes":        request.form.get("notes", "").strip(),
+    }
+    db_module.update_invoice_payment(pid, data)
+    payments = db_module.get_invoice_payments(tx_id)
+    p = next((x for x in payments if x["id"] == pid), None)
+    claim = db_module.get_claim(claim_id)
+    tx = db_module.get_transaction(tx_id)
+    row_html = render_template("partials/_inv_pay_row.html", claim=claim, tx=tx, p=p)
+    return row_html + _inv_amounts_oob(tx_id, tx)
+
+
 @app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/payments/<int:pid>", methods=["DELETE"])
 @login_required
 def payment_delete(claim_id: int, tx_id: int, pid: int):
@@ -2088,7 +2159,8 @@ def _tx_display_status(disbursements: list) -> str:
                     if d.get("fee_applies")
                     and (d.get("fee_owed") or 0) - (d.get("fee_deferred") or 0) > 0.005]
     all_fee = len(fee_disburse) == 0 or all(
-        (d.get("fee_collected") or 0) >= (d.get("fee_owed") or 0) for d in fee_disburse
+        (d.get("fee_collected") or 0) >= (d.get("fee_owed") or 0) - (d.get("fee_deferred") or 0) - 0.005
+        for d in fee_disburse
     )
     if all_client and all_fee:
         return "released"
@@ -2115,10 +2187,14 @@ _TX_STATUS_LABEL = {
 
 def _check_status_oob(tx_id: int) -> str:
     """OOB spans updating sidebar and tx-row status based on disbursement state."""
-    disbursements = db_module.get_disbursements(tx_id)
-    status = _tx_display_status(disbursements)
-    css = _TX_STATUS_CSS[status]
-    label = _TX_STATUS_LABEL[status]
+    tx = db_module.get_transaction(tx_id)
+    if tx and tx.get("void"):
+        css, label = "status-void", "Void"
+    else:
+        disbursements = db_module.get_disbursements(tx_id)
+        status = _tx_display_status(disbursements)
+        css = _TX_STATUS_CSS[status]
+        label = _TX_STATUS_LABEL[status]
     return (
         f'<span id="tx-sidebar-status" hx-swap-oob="true" class="status-badge {css}">{label}</span>'
         f'<span id="tx-status-{tx_id}" hx-swap-oob="true" class="status-badge {css}">{label}</span>'
@@ -2184,6 +2260,48 @@ def deferred_link_create(claim_id: int, tx_id: int):
     row_html = render_template("partials/_deferred_link_row.html", claim=claim, tx=tx, link=link)
     placeholder = '<tr id="deferred-link-new-row-placeholder"></tr>'
     return row_html + placeholder
+
+
+@app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/deferred-links/<int:lid>/edit")
+@login_required
+def deferred_link_edit_row(claim_id: int, tx_id: int, lid: int):
+    claim = db_module.get_claim(claim_id)
+    tx = db_module.get_transaction(tx_id)
+    links = db_module.get_invoice_deferred_links(tx_id)
+    link = next((l for l in links if l["id"] == lid), None)
+    if not link:
+        abort(404)
+    claim_txs_for_select = db_module.get_claim_transactions_for_select(claim_id, exclude_tx_id=tx_id)
+    return render_template("partials/_deferred_link_edit.html",
+                           claim=claim, tx=tx, link=link,
+                           claim_txs_for_select=claim_txs_for_select)
+
+
+@app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/deferred-links/<int:lid>/view")
+@login_required
+def deferred_link_view_row(claim_id: int, tx_id: int, lid: int):
+    claim = db_module.get_claim(claim_id)
+    tx = db_module.get_transaction(tx_id)
+    links = db_module.get_invoice_deferred_links(tx_id)
+    link = next((l for l in links if l["id"] == lid), None)
+    if not link:
+        abort(404)
+    return render_template("partials/_deferred_link_row.html", claim=claim, tx=tx, link=link)
+
+
+@app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/deferred-links/<int:lid>",
+           methods=["PUT"])
+@login_required
+def deferred_link_update(claim_id: int, tx_id: int, lid: int):
+    deferred_tx_id = request.form.get("deferred_tx_id")
+    if not deferred_tx_id:
+        abort(400)
+    db_module.update_invoice_deferred_link(lid, int(deferred_tx_id))
+    links = db_module.get_invoice_deferred_links(tx_id)
+    link = next((l for l in links if l["id"] == lid), None)
+    claim = db_module.get_claim(claim_id)
+    tx = db_module.get_transaction(tx_id)
+    return render_template("partials/_deferred_link_row.html", claim=claim, tx=tx, link=link)
 
 
 @app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/deferred-links/<int:lid>",
@@ -2376,6 +2494,273 @@ def _payroll_badge_html(status: str, paid: float, paid_date: str) -> str:
     if status == "n/a":
         return '<span class="text-muted">—</span>'
     return '<span class="text-muted">—</span>'
+
+
+# ---------------------------------------------------------------------------
+# CAT File Import
+# ---------------------------------------------------------------------------
+
+TMP_DIR = os.path.join(os.path.dirname(__file__), "tmp")
+
+
+def _save_parsed(data: dict) -> str:
+    """Write parsed data to a temp JSON file. Returns the key (UUID)."""
+    os.makedirs(TMP_DIR, exist_ok=True)
+    key = str(uuid.uuid4())
+    path = os.path.join(TMP_DIR, f"{key}.json")
+    with open(path, "w") as f:
+        json.dump(data, f, default=str)
+    return key
+
+
+def _load_parsed(key: str) -> dict | None:
+    if not key:
+        return None
+    path = os.path.join(TMP_DIR, f"{key}.json")
+    if not os.path.exists(path):
+        return None
+    with open(path) as f:
+        return json.load(f)
+
+
+def _delete_parsed(key: str) -> None:
+    if not key:
+        return
+    path = os.path.join(TMP_DIR, f"{key}.json")
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+@app.route("/import", methods=["GET"])
+@login_required
+def import_page():
+    return render_template("import.html", parsed=None, parse_errors=[])
+
+
+@app.route("/import", methods=["POST"])
+@login_required
+def import_upload():
+    f = request.files.get("xlsx_file")
+    if not f or not f.filename:
+        flash("Please select an Excel file to upload.", "error")
+        return redirect(url_for("import_page"))
+
+    if not f.filename.lower().endswith(".xlsx"):
+        flash("Only .xlsx files are supported.", "error")
+        return redirect(url_for("import_page"))
+
+    try:
+        import openpyxl
+        import import_cat as ic
+        wb = openpyxl.load_workbook(f, data_only=True)
+        parsed = ic.parse_workbook(wb)
+    except Exception as e:
+        flash(f"Failed to parse file: {e}", "error")
+        return redirect(url_for("import_page"))
+
+    key = _save_parsed(parsed)
+    session["import_key"] = key
+    return redirect(url_for("import_review"))
+
+
+@app.route("/import/review", methods=["GET"])
+@login_required
+def import_review():
+    key = session.get("import_key")
+    parsed = _load_parsed(key) if key else None
+    if not parsed:
+        flash("No import data found. Please upload a file.", "error")
+        return redirect(url_for("import_page"))
+    vendors = db_module.get_all_vendors()
+    return render_template(
+        "import.html",
+        parsed=parsed,
+        parse_errors=parsed.get("parse_errors", []),
+        tx_types=TRANSACTION_TYPES,
+        assignee_roles=ASSIGNEE_ROLES,
+        vendors=vendors,
+    )
+
+
+@app.route("/import/commit", methods=["POST"])
+@login_required
+def import_commit():
+    key = session.get("import_key")
+    parsed = _load_parsed(key) if key else None
+    if not parsed:
+        flash("Import session expired. Please upload again.", "error")
+        return redirect(url_for("import_page"))
+
+    try:
+        claim_id = _do_import(request.form, parsed)
+    except Exception as e:
+        flash(f"Import failed: {e}", "error")
+        return redirect(url_for("import_review"))
+
+    _delete_parsed(key)
+    session.pop("import_key", None)
+    flash("Import complete! Review and fill in fee details below.", "success")
+    return redirect(url_for("claim_detail", claim_id=claim_id))
+
+
+def _do_import(form, parsed: dict) -> int:
+    """Read flat form fields and write to DB. Returns new claim_id."""
+    f = form
+
+    # --- Claim ---
+    claim_data = {
+        "insured_name":  f.get("claim_insured_name", "").strip(),
+        "carrier":       f.get("claim_carrier", "").strip(),
+        "contract_pct":  db_module._f(f.get("claim_contract_pct")),
+        "job_number":    f.get("claim_job_number", "").strip(),
+        "claim_number":  f.get("claim_claim_number", "").strip(),
+        "mortgage_company": None,
+        "notes": None,
+        "proc_method_carrier": None,
+        "proc_method_draw":    None,
+        "proc_method_escrow":  None,
+    }
+    claim_id = db_module.create_claim(claim_data)
+
+    # --- Limits ---
+    limit_count = int(f.get("limit_count", 0))
+    for i in range(limit_count):
+        if not f.get(f"limit_{i}_include"):
+            continue
+        data = {
+            "coverage_type":  f.get(f"limit_{i}_coverage_type", "").strip(),
+            "base_limit":     db_module._f(f.get(f"limit_{i}_base_limit")),
+            "extended_limit": db_module._f(f.get(f"limit_{i}_extended_limit")),
+        }
+        db_module.ensure_coverage_type(data["coverage_type"])
+        db_module.create_limit(claim_id, data)
+
+    # --- Assignees ---
+    assignee_count = int(f.get("assignee_count", 0))
+    for i in range(assignee_count):
+        if not f.get(f"assignee_{i}_include"):
+            continue
+        data = {
+            "role":      f.get(f"assignee_{i}_role", "other"),
+            "name":      f.get(f"assignee_{i}_name", "").strip(),
+            "split_pct": db_module._f(f.get(f"assignee_{i}_split_pct")),
+            "sort_order": i,
+            "recipient_id": None,
+        }
+        db_module.create_assignee(claim_id, data)
+
+    # --- Transactions ---
+    tx_count = int(f.get("tx_count", 0))
+    for i in range(tx_count):
+        if not f.get(f"tx_{i}_include"):
+            continue
+        tx_type = f.get(f"tx_{i}_type", "Carrier")
+        tx_data = {
+            "sequence_number": f.get(f"tx_{i}_seq") or None,
+            "check_number":    f.get(f"tx_{i}_check_number", "").strip() or None,
+            "date":            f.get(f"tx_{i}_check_date", "").strip(),
+            "received_date":   f.get(f"tx_{i}_received_date", "").strip(),
+            "amount":          db_module._f(f.get(f"tx_{i}_amount")),
+            "type":            tx_type,
+            "payer":           f.get(f"tx_{i}_payer", "").strip(),
+            "payees_text":     f.get(f"tx_{i}_payees_text", "").strip(),
+            "invoice_number":  f.get(f"tx_{i}_invoice_number", "").strip(),
+            # Fee fields intentionally 0 at import — user fills in post-import
+            "fee_owed": 0.0, "balance": 0.0, "deferred": 0.0, "recouped": 0.0,
+            "fee_collected": 0.0, "reimbursed": 0.0, "total_collected": 0.0,
+            "unpaid_payee_expense": 0.0, "outstanding_expense": 0.0,
+            "ott": None, "notes": "", "check_id": None,
+            "endorsed": False, "void": False,
+            "linked_escrow_id": None, "inv_for": "insured", "inv_vendor_id": None,
+            "proc_method": None, "proc_fee_invoice_id": None,
+        }
+        tx_id = db_module.create_transaction(claim_id, tx_data)
+
+        # For fee invoices, create the payment record if checked and amount > 0
+        if tx_type == "Fee Invoice" and f.get(f"tx_{i}_pay_include"):
+            pay_amt = db_module._f(f.get(f"tx_{i}_pay_amount"))
+            if pay_amt and pay_amt > 0:
+                db_module.create_invoice_payment(tx_id, {
+                    "date":      f.get(f"tx_{i}_received_date", "").strip(),
+                    "amount":    pay_amt,
+                    "method":    "qb",
+                    "reference": f.get(f"tx_{i}_pay_reference", "").strip(),
+                })
+
+        # Coverage allocations
+        cov_count = int(f.get(f"tx_{i}_cov_count", 0))
+        for j in range(cov_count):
+            if not f.get(f"tx_{i}_cov_{j}_include"):
+                continue
+            cov_type = f.get(f"tx_{i}_cov_{j}_coverage_type", "").strip()
+            if cov_type:
+                db_module.ensure_coverage_type(cov_type)
+            db_module.create_coverage(tx_id, {
+                "coverage_type": cov_type,
+                "amount": db_module._f(f.get(f"tx_{i}_cov_{j}_amount")),
+            })
+
+        # Disbursements
+        disb_count = int(f.get(f"tx_{i}_disb_count", 0))
+        for j in range(disb_count):
+            if not f.get(f"tx_{i}_disb_{j}_include"):
+                continue
+            vendor_id = f.get(f"tx_{i}_disb_{j}_vendor_id") or None
+            fee_pct_raw = db_module._fopt(f.get(f"tx_{i}_disb_{j}_fee_pct"))
+            db_module.create_disbursement(tx_id, {
+                "sort_order":     j,
+                "recipient_type": f.get(f"tx_{i}_disb_{j}_recipient_type", "insured"),
+                "vendor_id":      vendor_id,
+                "recipient_name": f.get(f"tx_{i}_disb_{j}_recipient_name", "").strip(),
+                "amount":         db_module._f(f.get(f"tx_{i}_disb_{j}_amount")),
+                "fee_applies":    bool(fee_pct_raw),
+                "fee_pct":        fee_pct_raw,
+                "fee_owed":       db_module._f(f.get(f"tx_{i}_disb_{j}_fee_owed")),
+                "fee_collected":  db_module._f(f.get(f"tx_{i}_disb_{j}_fee_collected")),
+                "fee_deferred":   db_module._f(f.get(f"tx_{i}_disb_{j}_fee_deferred")),
+                "fee_recouped":   db_module._f(f.get(f"tx_{i}_disb_{j}_fee_recouped")),
+                "use_check_splits": True, "notes": "",
+            })
+
+    # --- Expenses ---
+    exp_count = int(f.get("exp_count", 0))
+    for i in range(exp_count):
+        if not f.get(f"exp_{i}_include"):
+            continue
+        exp_id = db_module.create_expense(claim_id, {
+            "invoice_date":      f.get(f"exp_{i}_invoice_date", "").strip(),
+            "payee_name":        f.get(f"exp_{i}_payee_name", "").strip(),
+            "vendor_id":         None,
+            "invoice_amount":    db_module._f(f.get(f"exp_{i}_invoice_amount")),
+            "responsible_party": f.get(f"exp_{i}_responsible_party", "").strip(),
+            "unpaid_to_payee":   0.0,
+            "client_outstanding": 0.0,
+            "wp_outstanding":    0.0,
+            "reason":            f.get(f"exp_{i}_reason", "").strip(),
+            "invoice_number":    f.get(f"exp_{i}_invoice_number", "").strip(),
+            "client_amount":     db_module._f(f.get(f"exp_{i}_client_amount")),
+            "wp_amount":         db_module._f(f.get(f"exp_{i}_wp_amount")),
+        })
+
+        # Create expense_payment records for amounts already paid to payee
+        client_paid = db_module._f(f.get(f"exp_{i}_client_paid"))
+        if client_paid and client_paid > 0:
+            db_module.create_expense_payment(exp_id, {
+                "paid_by": "client",
+                "amount":  client_paid,
+                "date":    f.get(f"exp_{i}_invoice_date", "").strip(),
+            })
+        wp_paid = db_module._f(f.get(f"exp_{i}_wp_paid"))
+        if wp_paid and wp_paid > 0:
+            db_module.create_expense_payment(exp_id, {
+                "paid_by": "wp",
+                "amount":  wp_paid,
+                "date":    f.get(f"exp_{i}_invoice_date", "").strip(),
+            })
+
+    return claim_id
 
 
 # ---------------------------------------------------------------------------
