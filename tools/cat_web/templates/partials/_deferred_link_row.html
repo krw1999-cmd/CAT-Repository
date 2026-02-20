@@ -1,0 +1,19 @@
+<tr id="deferred-link-{{ link.id }}">
+  <td>#{{ link.sequence_number or '—' }}</td>
+  <td>
+    <span class="tx-type-badge tx-type-{{ (link.type or 'other')|lower|replace(' ', '-') }}">
+      {{ link.type or '—' }}
+    </span>
+  </td>
+  <td class="nowrap">{{ link.date or '—' }}</td>
+  <td class="num">{{ (link.amount or 0) | money }}</td>
+  <td class="num">{{ (link.deferred or 0) | money }}</td>
+  <td class="actions-col">
+    <button class="btn-icon btn-icon-danger"
+            hx-delete="{{ url_for('deferred_link_delete', claim_id=claim.id, tx_id=tx.id, lid=link.id) }}"
+            hx-target="#deferred-link-{{ link.id }}"
+            hx-swap="outerHTML"
+            hx-confirm="Remove this deferred fee link?"
+            title="Delete">✕</button>
+  </td>
+</tr>

@@ -27,7 +27,6 @@ auth.init_app(app)
 app.teardown_appcontext(db_module.close_db)
 
 TRANSACTION_TYPES = db_module.TRANSACTION_TYPES
-COVERAGE_TYPES = db_module.COVERAGE_TYPES
 ASSIGNEE_ROLES = db_module.ASSIGNEE_ROLES
 
 
@@ -118,7 +117,7 @@ def claim_detail(claim_id: int):
         summary=summary,
         open_escrows=open_escrows,
         tx_types=TRANSACTION_TYPES,
-        coverage_types=COVERAGE_TYPES,
+        coverage_types=db_module.get_coverage_types(),
     )
 
 
@@ -154,6 +153,9 @@ def claim_header_save(claim_id: int):
         "insured_name": request.form.get("insured_name", "").strip(),
         "carrier": request.form.get("carrier", "").strip(),
         "contract_pct": db_module._f(request.form.get("contract_pct")),
+        "proc_method_carrier": request.form.get("proc_method_carrier") or None,
+        "proc_method_draw":    request.form.get("proc_method_draw") or None,
+        "proc_method_escrow":  request.form.get("proc_method_escrow") or None,
     }
     db_module.update_claim(claim_id, data)
     claim = db_module.get_claim(claim_id)
@@ -171,13 +173,14 @@ def limit_new_row(claim_id: int):
     return render_template("partials/_limit_edit.html",
                            claim=claim,
                            limit=None,
-                           coverage_types=COVERAGE_TYPES)
+                           coverage_types=db_module.get_coverage_types())
 
 
 @app.route("/claims/<int:claim_id>/limits", methods=["POST"])
 @login_required
 def limit_create(claim_id: int):
     data = _limit_data_from_form()
+    db_module.ensure_coverage_type(data["coverage_type"])
     limit_id = db_module.create_limit(claim_id, data)
     limit = db_module.get_limit(limit_id)
     claim = db_module.get_claim(claim_id)
@@ -196,13 +199,14 @@ def limit_edit_row(claim_id: int, limit_id: int):
     return render_template("partials/_limit_edit.html",
                            claim=claim,
                            limit=limit,
-                           coverage_types=COVERAGE_TYPES)
+                           coverage_types=db_module.get_coverage_types())
 
 
 @app.route("/claims/<int:claim_id>/limits/<int:limit_id>", methods=["PUT"])
 @login_required
 def limit_update(claim_id: int, limit_id: int):
     data = _limit_data_from_form()
+    db_module.ensure_coverage_type(data["coverage_type"])
     db_module.update_limit(limit_id, data)
     limit = db_module.get_limit(limit_id)
     claim = db_module.get_claim(claim_id)
@@ -221,8 +225,6 @@ def _limit_data_from_form() -> dict:
         "coverage_type": request.form.get("coverage_type", "").strip(),
         "base_limit": db_module._f(request.form.get("base_limit")),
         "extended_limit": db_module._f(request.form.get("extended_limit")),
-        "paid": db_module._f(request.form.get("paid")),
-        "remaining": db_module._f(request.form.get("remaining")),
     }
 
 
@@ -234,12 +236,10 @@ def _limit_data_from_form() -> dict:
 @login_required
 def tx_new_row(claim_id: int):
     claim = db_module.get_claim(claim_id)
-    open_escrows = db_module.get_open_escrows(claim_id)
     return render_template("partials/_tx_edit.html",
                            claim=claim,
                            tx=None,
-                           tx_types=TRANSACTION_TYPES,
-                           open_escrows=open_escrows)
+                           tx_types=TRANSACTION_TYPES)
 
 
 @app.route("/claims/<int:claim_id>/transactions", methods=["POST"])
@@ -267,18 +267,29 @@ def tx_edit_row(claim_id: int, tx_id: int):
     tx = db_module.get_transaction(tx_id)
     if not tx:
         abort(404)
-    open_escrows = db_module.get_open_escrows(claim_id)
     return render_template("partials/_tx_edit.html",
                            claim=claim,
                            tx=tx,
-                           tx_types=TRANSACTION_TYPES,
-                           open_escrows=open_escrows)
+                           tx_types=TRANSACTION_TYPES)
 
 
 @app.route("/claims/<int:claim_id>/transactions/<int:tx_id>", methods=["PUT"])
 @login_required
 def tx_update(claim_id: int, tx_id: int):
-    data = _tx_data_from_form()
+    tx_existing = db_module.get_transaction(tx_id)
+    if not tx_existing:
+        abort(404)
+    # Patch: start from current DB values so detail-page fields aren't wiped
+    data = dict(tx_existing)
+    data.update({
+        "check_number":     request.form.get("check_number", "").strip() or None,
+        "date":             request.form.get("date", "").strip(),
+        "type":             request.form.get("type", "").strip(),
+        "amount":           db_module._f(request.form.get("amount")),
+        "payer":            request.form.get("payer", "").strip(),
+        "notes":            request.form.get("notes", "").strip(),
+        "linked_escrow_id": request.form.get("linked_escrow_id") or None,
+    })
     db_module.update_transaction(tx_id, data)
     txs = db_module.get_transactions(claim_id)
     tx = next((t for t in txs if t["id"] == tx_id), None)
@@ -306,6 +317,7 @@ def tx_delete(claim_id: int, tx_id: int):
 def _tx_data_from_form() -> dict:
     return {
         "sequence_number":     request.form.get("sequence_number") or None,
+        "check_number":        request.form.get("check_number", "").strip() or None,
         "date":                request.form.get("date", "").strip(),
         "amount":              db_module._f(request.form.get("amount")),
         "type":                request.form.get("type", "").strip(),
@@ -333,7 +345,8 @@ def _tx_data_from_form() -> dict:
 @login_required
 def exp_new_row(claim_id: int):
     claim = db_module.get_claim(claim_id)
-    return render_template("partials/_exp_edit.html", claim=claim, exp=None)
+    vendors = db_module.get_all_vendors()
+    return render_template("partials/_exp_edit.html", claim=claim, exp=None, vendors=vendors)
 
 
 @app.route("/claims/<int:claim_id>/expenses", methods=["POST"])
@@ -343,6 +356,7 @@ def exp_create(claim_id: int):
     exp_id = db_module.create_expense(claim_id, data)
     exp = db_module.get_expense(exp_id)
     claim = db_module.get_claim(claim_id)
+    vendors = db_module.get_all_vendors()
     row_html = render_template("partials/_exp_row.html", claim=claim, exp=exp)
     placeholder = '<tr id="exp-new-row-placeholder"></tr>'
     return row_html + placeholder
@@ -353,9 +367,10 @@ def exp_create(claim_id: int):
 def exp_edit_row(claim_id: int, exp_id: int):
     claim = db_module.get_claim(claim_id)
     exp = db_module.get_expense(exp_id)
+    vendors = db_module.get_all_vendors()
     if not exp:
         abort(404)
-    return render_template("partials/_exp_edit.html", claim=claim, exp=exp)
+    return render_template("partials/_exp_edit.html", claim=claim, exp=exp, vendors=vendors)
 
 
 @app.route("/claims/<int:claim_id>/expenses/<int:exp_id>", methods=["PUT"])
@@ -377,14 +392,308 @@ def exp_delete(claim_id: int, exp_id: int):
 
 def _exp_data_from_form() -> dict:
     return {
-        "invoice_date": request.form.get("invoice_date", "").strip(),
-        "payee_name": request.form.get("payee_name", "").strip(),
-        "invoice_amount": db_module._f(request.form.get("invoice_amount")),
+        "invoice_date":      request.form.get("invoice_date", "").strip(),
+        "payee_name":        request.form.get("payee_name", "").strip(),
+        "vendor_id":         request.form.get("vendor_id") or None,
+        "invoice_amount":    db_module._f(request.form.get("invoice_amount")),
         "responsible_party": request.form.get("responsible_party", "").strip(),
-        "unpaid_to_payee": db_module._f(request.form.get("unpaid_to_payee")),
-        "client_outstanding": db_module._f(request.form.get("client_outstanding")),
-        "wp_outstanding": db_module._f(request.form.get("wp_outstanding")),
+        "unpaid_to_payee":   db_module._f(request.form.get("unpaid_to_payee")),
+        "client_outstanding":db_module._f(request.form.get("client_outstanding")),
+        "wp_outstanding":    db_module._f(request.form.get("wp_outstanding")),
+        "reason":            request.form.get("reason", "").strip(),
+        "invoice_number":    request.form.get("invoice_number", "").strip(),
+        "client_amount":     db_module._f(request.form.get("client_amount")),
+        "wp_amount":         db_module._f(request.form.get("wp_amount")),
     }
+
+
+# ---------------------------------------------------------------------------
+# Expense detail page
+# ---------------------------------------------------------------------------
+
+@app.route("/claims/<int:claim_id>/expenses/<int:exp_id>")
+@login_required
+def expense_detail(claim_id: int, exp_id: int):
+    claim   = db_module.get_claim(claim_id)
+    expense = db_module.get_expense(exp_id)
+    if not claim or not expense:
+        abort(404)
+    payments       = db_module.get_expense_payments(exp_id)
+    reimbursements = db_module.get_expense_reimbursements(exp_id)
+    splits         = db_module.get_expense_splits(exp_id)
+    totals         = db_module.get_expense_totals(exp_id)
+    claim_txs      = db_module.get_claim_transactions_for_select(claim_id)
+    vendors        = db_module.get_all_vendors()
+    return render_template(
+        "expense.html",
+        claim=claim, expense=expense,
+        payments=payments, reimbursements=reimbursements,
+        splits=splits, totals=totals,
+        claim_txs_for_select=claim_txs,
+        vendors=vendors,
+    )
+
+
+# Expense info card — view / edit / save
+
+@app.route("/claims/<int:claim_id>/expenses/<int:exp_id>/info")
+@login_required
+def exp_info_view(claim_id: int, exp_id: int):
+    claim   = db_module.get_claim(claim_id)
+    expense = db_module.get_expense(exp_id)
+    if not expense:
+        abort(404)
+    return render_template("partials/_exp_info.html", claim=claim, expense=expense)
+
+
+@app.route("/claims/<int:claim_id>/expenses/<int:exp_id>/info/edit")
+@login_required
+def exp_info_edit(claim_id: int, exp_id: int):
+    claim   = db_module.get_claim(claim_id)
+    expense = db_module.get_expense(exp_id)
+    vendors = db_module.get_all_vendors()
+    if not expense:
+        abort(404)
+    return render_template("partials/_exp_info_edit.html", claim=claim, expense=expense, vendors=vendors)
+
+
+@app.route("/claims/<int:claim_id>/expenses/<int:exp_id>/info", methods=["POST"])
+@login_required
+def exp_info_save(claim_id: int, exp_id: int):
+    data = _exp_data_from_form()
+    db_module.update_expense(exp_id, data)
+    claim   = db_module.get_claim(claim_id)
+    expense = db_module.get_expense(exp_id)
+    return render_template("partials/_exp_info.html", claim=claim, expense=expense)
+
+
+# Expense payments
+
+@app.route("/claims/<int:claim_id>/expenses/<int:exp_id>/payments/new-row")
+@login_required
+def exp_pay_new_row(claim_id: int, exp_id: int):
+    claim   = db_module.get_claim(claim_id)
+    expense = db_module.get_expense(exp_id)
+    return render_template("partials/_exp_pay_edit.html", claim=claim, expense=expense, p=None)
+
+
+@app.route("/claims/<int:claim_id>/expenses/<int:exp_id>/payments", methods=["POST"])
+@login_required
+def exp_pay_create(claim_id: int, exp_id: int):
+    data = {
+        "date":      request.form.get("date", "").strip(),
+        "paid_by":   request.form.get("paid_by", "wp"),
+        "amount":    db_module._f(request.form.get("amount")),
+        "method":    request.form.get("method", "").strip(),
+        "reference": request.form.get("reference", "").strip(),
+        "notes":     request.form.get("notes", "").strip(),
+    }
+    pid     = db_module.create_expense_payment(exp_id, data)
+    claim   = db_module.get_claim(claim_id)
+    expense = db_module.get_expense(exp_id)
+    p       = _row_from_list(db_module.get_expense_payments(exp_id), pid)
+    totals  = db_module.get_expense_totals(exp_id)
+    row_html = render_template("partials/_exp_pay_row.html", claim=claim, expense=expense, p=p)
+    placeholder = '<tr id="exp-pay-new-row-placeholder"></tr>'
+    sidebar_html = render_template("partials/_exp_totals_oob.html", expense=expense, totals=totals)
+    return row_html + placeholder + sidebar_html
+
+
+@app.route("/claims/<int:claim_id>/expenses/<int:exp_id>/payments/<int:pid>/edit")
+@login_required
+def exp_pay_edit_row(claim_id: int, exp_id: int, pid: int):
+    claim   = db_module.get_claim(claim_id)
+    expense = db_module.get_expense(exp_id)
+    p       = _row_from_list(db_module.get_expense_payments(exp_id), pid)
+    return render_template("partials/_exp_pay_edit.html", claim=claim, expense=expense, p=p)
+
+
+@app.route("/claims/<int:claim_id>/expenses/<int:exp_id>/payments/<int:pid>/view")
+@login_required
+def exp_pay_view_row(claim_id: int, exp_id: int, pid: int):
+    claim   = db_module.get_claim(claim_id)
+    expense = db_module.get_expense(exp_id)
+    p       = _row_from_list(db_module.get_expense_payments(exp_id), pid)
+    return render_template("partials/_exp_pay_row.html", claim=claim, expense=expense, p=p)
+
+
+@app.route("/claims/<int:claim_id>/expenses/<int:exp_id>/payments/<int:pid>", methods=["PUT"])
+@login_required
+def exp_pay_update(claim_id: int, exp_id: int, pid: int):
+    data = {
+        "date":      request.form.get("date", "").strip(),
+        "paid_by":   request.form.get("paid_by", "wp"),
+        "amount":    db_module._f(request.form.get("amount")),
+        "method":    request.form.get("method", "").strip(),
+        "reference": request.form.get("reference", "").strip(),
+        "notes":     request.form.get("notes", "").strip(),
+    }
+    db_module.update_expense_payment(pid, data)
+    claim   = db_module.get_claim(claim_id)
+    expense = db_module.get_expense(exp_id)
+    p       = _row_from_list(db_module.get_expense_payments(exp_id), pid)
+    totals  = db_module.get_expense_totals(exp_id)
+    row_html    = render_template("partials/_exp_pay_row.html", claim=claim, expense=expense, p=p)
+    sidebar_html = render_template("partials/_exp_totals_oob.html", expense=expense, totals=totals)
+    return row_html + sidebar_html
+
+
+@app.route("/claims/<int:claim_id>/expenses/<int:exp_id>/payments/<int:pid>", methods=["DELETE"])
+@login_required
+def exp_pay_delete(claim_id: int, exp_id: int, pid: int):
+    db_module.delete_expense_payment(pid)
+    claim   = db_module.get_claim(claim_id)
+    expense = db_module.get_expense(exp_id)
+    totals  = db_module.get_expense_totals(exp_id)
+    return render_template("partials/_exp_totals_oob.html", expense=expense, totals=totals)
+
+
+# Expense reimbursements
+
+@app.route("/claims/<int:claim_id>/expenses/<int:exp_id>/reimbursements/new-row")
+@login_required
+def exp_reimb_new_row(claim_id: int, exp_id: int):
+    claim   = db_module.get_claim(claim_id)
+    expense = db_module.get_expense(exp_id)
+    claim_txs = db_module.get_claim_transactions_for_select(claim_id)
+    return render_template("partials/_exp_reimb_edit.html",
+                           claim=claim, expense=expense, r=None,
+                           claim_txs_for_select=claim_txs)
+
+
+@app.route("/claims/<int:claim_id>/expenses/<int:exp_id>/reimbursements", methods=["POST"])
+@login_required
+def exp_reimb_create(claim_id: int, exp_id: int):
+    data = {
+        "date":        request.form.get("date", "").strip(),
+        "amount":      db_module._f(request.form.get("amount")),
+        "method":      request.form.get("method", "").strip(),
+        "reference":   request.form.get("reference", "").strip(),
+        "linked_tx_id":request.form.get("linked_tx_id") or None,
+        "notes":       request.form.get("notes", "").strip(),
+    }
+    rid     = db_module.create_expense_reimbursement(exp_id, data)
+    claim   = db_module.get_claim(claim_id)
+    expense = db_module.get_expense(exp_id)
+    r       = _row_from_list(db_module.get_expense_reimbursements(exp_id), rid)
+    totals  = db_module.get_expense_totals(exp_id)
+    row_html = render_template("partials/_exp_reimb_row.html", claim=claim, expense=expense, r=r)
+    placeholder = '<tr id="exp-reimb-new-row-placeholder"></tr>'
+    sidebar_html = render_template("partials/_exp_totals_oob.html", expense=expense, totals=totals)
+    return row_html + placeholder + sidebar_html
+
+
+@app.route("/claims/<int:claim_id>/expenses/<int:exp_id>/reimbursements/<int:rid>", methods=["DELETE"])
+@login_required
+def exp_reimb_delete(claim_id: int, exp_id: int, rid: int):
+    db_module.delete_expense_reimbursement(rid)
+    claim   = db_module.get_claim(claim_id)
+    expense = db_module.get_expense(exp_id)
+    totals  = db_module.get_expense_totals(exp_id)
+    return render_template("partials/_exp_totals_oob.html", expense=expense, totals=totals)
+
+
+# Expense splits
+
+@app.route("/claims/<int:claim_id>/expenses/<int:exp_id>/splits/new-row")
+@login_required
+def exp_split_new_row(claim_id: int, exp_id: int):
+    claim   = db_module.get_claim(claim_id)
+    expense = db_module.get_expense(exp_id)
+    return render_template("partials/_exp_split_edit.html",
+                           claim=claim, expense=expense, split=None,
+                           roles=db_module.ASSIGNEE_ROLES,
+                           fee_recipients=db_module.get_all_fee_recipients())
+
+
+@app.route("/claims/<int:claim_id>/expenses/<int:exp_id>/splits/<int:sid>/edit")
+@login_required
+def exp_split_edit_row(claim_id: int, exp_id: int, sid: int):
+    claim   = db_module.get_claim(claim_id)
+    expense = db_module.get_expense(exp_id)
+    splits  = db_module.get_expense_splits(exp_id)
+    split   = _row_from_list(splits, sid)
+    if not split:
+        abort(404)
+    return render_template("partials/_exp_split_edit.html",
+                           claim=claim, expense=expense, split=split,
+                           roles=db_module.ASSIGNEE_ROLES,
+                           fee_recipients=db_module.get_all_fee_recipients())
+
+
+@app.route("/claims/<int:claim_id>/expenses/<int:exp_id>/splits/<int:sid>/view")
+@login_required
+def exp_split_view_row(claim_id: int, exp_id: int, sid: int):
+    claim   = db_module.get_claim(claim_id)
+    expense = db_module.get_expense(exp_id)
+    splits  = db_module.get_expense_splits(exp_id)
+    split   = _row_from_list(splits, sid)
+    if not split:
+        abort(404)
+    return render_template("partials/_exp_split_row.html", claim=claim, expense=expense, split=split)
+
+
+@app.route("/claims/<int:claim_id>/expenses/<int:exp_id>/splits", methods=["POST"])
+@login_required
+def exp_split_create(claim_id: int, exp_id: int):
+    rid = request.form.get("recipient_id") or None
+    data = {
+        "role":         request.form.get("role", "other"),
+        "name":         _recipient_name_from_id(rid),
+        "split_pct":    db_module._f(request.form.get("split_pct")),
+        "recipient_id": rid,
+    }
+    sid     = db_module.create_expense_split(exp_id, data)
+    claim   = db_module.get_claim(claim_id)
+    expense = db_module.get_expense(exp_id)
+    split   = _row_from_list(db_module.get_expense_splits(exp_id), sid)
+    row_html = render_template("partials/_exp_split_row.html", claim=claim, expense=expense, split=split)
+    placeholder = '<tr id="exp-split-new-row-placeholder"></tr>'
+    return row_html + placeholder
+
+
+@app.route("/claims/<int:claim_id>/expenses/<int:exp_id>/splits/<int:sid>", methods=["PUT"])
+@login_required
+def exp_split_update(claim_id: int, exp_id: int, sid: int):
+    rid = request.form.get("recipient_id") or None
+    data = {
+        "role":         request.form.get("role", "other"),
+        "name":         _recipient_name_from_id(rid),
+        "split_pct":    db_module._f(request.form.get("split_pct")),
+        "recipient_id": rid,
+    }
+    db_module.update_expense_split(sid, data)
+    claim   = db_module.get_claim(claim_id)
+    expense = db_module.get_expense(exp_id)
+    split   = _row_from_list(db_module.get_expense_splits(exp_id), sid)
+    return render_template("partials/_exp_split_row.html", claim=claim, expense=expense, split=split)
+
+
+@app.route("/claims/<int:claim_id>/expenses/<int:exp_id>/splits/<int:sid>", methods=["DELETE"])
+@login_required
+def exp_split_delete(claim_id: int, exp_id: int, sid: int):
+    db_module.delete_expense_split(sid)
+    return ""
+
+
+@app.route("/claims/<int:claim_id>/expenses/<int:exp_id>/splits/seed", methods=["POST"])
+@login_required
+def exp_split_seed(claim_id: int, exp_id: int):
+    # Delete existing and re-clone
+    for s in db_module.get_expense_splits(exp_id):
+        db_module.delete_expense_split(s["id"])
+    db_module.clone_splits_from_assignees_for_expense(claim_id, exp_id)
+    claim   = db_module.get_claim(claim_id)
+    expense = db_module.get_expense(exp_id)
+    splits  = db_module.get_expense_splits(exp_id)
+    return render_template("partials/_exp_splits_section.html", claim=claim, expense=expense, splits=splits)
+
+
+def _row_from_list(rows: list, row_id: int) -> dict | None:
+    for r in rows:
+        if r.get("id") == row_id:
+            return r
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -461,8 +770,8 @@ def _coverage_to_type(coverage: str) -> str:
 def assignee_new_row(claim_id: int):
     claim = db_module.get_claim(claim_id)
     return render_template("partials/_assignee_edit.html",
-                           claim=claim, assignee=None,
-                           roles=ASSIGNEE_ROLES)
+                           claim=claim, assignee=None, roles=ASSIGNEE_ROLES,
+                           fee_recipients=db_module.get_all_fee_recipients())
 
 @app.route("/claims/<int:claim_id>/assignees", methods=["POST"])
 @login_required
@@ -485,7 +794,8 @@ def assignee_edit_row(claim_id: int, aid: int):
     if not assignee:
         abort(404)
     return render_template("partials/_assignee_edit.html",
-                           claim=claim, assignee=assignee, roles=ASSIGNEE_ROLES)
+                           claim=claim, assignee=assignee, roles=ASSIGNEE_ROLES,
+                           fee_recipients=db_module.get_all_fee_recipients())
 
 @app.route("/claims/<int:claim_id>/assignees/<int:aid>", methods=["PUT"])
 @login_required
@@ -514,12 +824,21 @@ def assignee_view_row(claim_id: int, aid: int):
     return render_template("partials/_assignee_row.html",
                            claim=claim, assignee=assignee, roles=ASSIGNEE_ROLES)
 
+def _recipient_name_from_id(recipient_id) -> str:
+    """Look up a fee recipient's name by id; return empty string if not found."""
+    if not recipient_id:
+        return ""
+    rec = db_module.get_fee_recipient(int(recipient_id))
+    return rec["name"] if rec else ""
+
 def _assignee_data_from_form() -> dict:
+    rid = request.form.get("recipient_id") or None
     return {
-        "role": request.form.get("role", "other"),
-        "name": request.form.get("name", "").strip(),
-        "split_pct": db_module._f(request.form.get("split_pct")),
-        "sort_order": request.form.get("sort_order", 0),
+        "role":         request.form.get("role", "other"),
+        "name":         _recipient_name_from_id(rid),
+        "split_pct":    db_module._f(request.form.get("split_pct")),
+        "sort_order":   request.form.get("sort_order", 0),
+        "recipient_id": rid,
     }
 
 def _assignee_total_oob(claim_id: int) -> str:
@@ -538,21 +857,27 @@ def tx_detail(claim_id: int, tx_id: int):
     tx = db_module.get_transaction(tx_id)
     if not claim or not tx:
         abort(404)
-    splits = db_module.get_splits_with_amounts(tx_id)
     coverages = db_module.get_coverages(tx_id)
     disbursements = db_module.get_disbursements(tx_id)
-    disburse_totals = db_module.get_disbursement_totals(tx_id)
+    disburse_totals = _effective_split_basis(tx)
+    has_custom_recouped = db_module.has_custom_recouped_splits(tx_id)
+    include_recouped = not has_custom_recouped
+    splits = [db_module.calc_split_amounts(s, disburse_totals, include_recouped=include_recouped)
+              for s in db_module.get_splits(tx_id)]
+    recouped_splits = db_module.get_recouped_splits(tx_id) if has_custom_recouped else []
     vendors = db_module.get_all_vendors()
 
-    # Linked escrow info (for Draw transactions)
-    linked_escrow = None
-    escrow_disbursements = []
-    if tx.get("linked_escrow_id"):
-        linked_escrow = db_module.get_transaction(tx["linked_escrow_id"])
-        escrow_disbursements = db_module.get_disbursements(tx["linked_escrow_id"])
+    escrow_checklist = []
+    if (tx.get("type") or "").lower() == "draw":
+        escrow_checklist = db_module.get_escrow_checklist(claim_id)
 
-    # Build set of recipient names already in this tx's disbursements for checklist
-    covered_recipients = {d.get("recipient_name", "").lower() for d in disbursements}
+    invoice_payments = []
+    invoice_deferred_links = []
+    claim_txs_for_select = []
+    if (tx.get("type") or "").lower() == "fee invoice":
+        invoice_payments = db_module.get_invoice_payments(tx_id)
+        invoice_deferred_links = db_module.get_invoice_deferred_links(tx_id)
+        claim_txs_for_select = db_module.get_claim_transactions_for_select(claim_id, exclude_tx_id=tx_id)
 
     return render_template(
         "transaction.html",
@@ -562,12 +887,15 @@ def tx_detail(claim_id: int, tx_id: int):
         coverages=coverages,
         disbursements=disbursements,
         disburse_totals=disburse_totals,
+        has_custom_recouped=has_custom_recouped,
+        recouped_splits=recouped_splits,
         vendors=vendors,
-        linked_escrow=linked_escrow,
-        escrow_disbursements=escrow_disbursements,
-        covered_recipients=covered_recipients,
+        escrow_checklist=escrow_checklist,
+        invoice_payments=invoice_payments,
+        invoice_deferred_links=invoice_deferred_links,
+        claim_txs_for_select=claim_txs_for_select,
         roles=ASSIGNEE_ROLES,
-        coverage_types=COVERAGE_TYPES,
+        coverage_types=db_module.get_coverage_types(),
         tx_types=TRANSACTION_TYPES,
     )
 
@@ -581,10 +909,10 @@ def tx_info_view(claim_id: int, tx_id: int):
     tx = db_module.get_transaction(tx_id)
     if not claim or not tx:
         abort(404)
-    open_escrows = db_module.get_open_escrows(claim_id)
     return render_template("partials/_tx_info.html", claim=claim, tx=tx,
                            tx_types=TRANSACTION_TYPES,
-                           open_escrows=open_escrows)
+                           vendors=db_module.get_all_vendors(),
+                           fee_invoices=db_module.get_fee_invoices(claim_id))
 
 
 @app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/info/edit")
@@ -594,10 +922,10 @@ def tx_info_edit(claim_id: int, tx_id: int):
     tx = db_module.get_transaction(tx_id)
     if not claim or not tx:
         abort(404)
-    open_escrows = db_module.get_open_escrows(claim_id)
     return render_template("partials/_tx_info_edit.html",
                            claim=claim, tx=tx, tx_types=TRANSACTION_TYPES,
-                           open_escrows=open_escrows)
+                           vendors=db_module.get_all_vendors(),
+                           fee_invoices=db_module.get_fee_invoices(claim_id))
 
 @app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/info", methods=["POST"])
 @login_required
@@ -617,14 +945,19 @@ def tx_info_save(claim_id: int, tx_id: int):
         "date":            request.form.get("date", tx.get("date", "")),
         "notes":           request.form.get("notes", tx.get("notes", "")),
         "linked_escrow_id": request.form.get("linked_escrow_id") or None,
+        "invoice_number":  request.form.get("invoice_number", "").strip(),
+        "inv_for":         request.form.get("inv_for", "insured"),
+        "inv_vendor_id":   request.form.get("inv_vendor_id") or None,
+        "proc_method":         request.form.get("proc_method") or None,
+        "proc_fee_invoice_id": request.form.get("proc_fee_invoice_id") or None,
     })
     db_module.update_transaction(tx_id, data)
     tx = db_module.get_transaction(tx_id)
     claim = db_module.get_claim(claim_id)
-    open_escrows = db_module.get_open_escrows(claim_id)
     return render_template("partials/_tx_info.html", claim=claim, tx=tx,
                            tx_types=TRANSACTION_TYPES,
-                           open_escrows=open_escrows)
+                           vendors=db_module.get_all_vendors(),
+                           fee_invoices=db_module.get_fee_invoices(claim_id))
 
 
 # ---------------------------------------------------------------------------
@@ -637,21 +970,23 @@ def split_new_row(claim_id: int, tx_id: int):
     claim = db_module.get_claim(claim_id)
     tx = db_module.get_transaction(tx_id)
     return render_template("partials/_split_edit.html",
-                           claim=claim, tx=tx, split=None, roles=ASSIGNEE_ROLES)
+                           claim=claim, tx=tx, split=None, roles=ASSIGNEE_ROLES,
+                           fee_recipients=db_module.get_all_fee_recipients())
 
 @app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/splits", methods=["POST"])
 @login_required
 def split_create(claim_id: int, tx_id: int):
     data = _split_data_from_form()
     sid = db_module.create_split(tx_id, data)
-    split = db_module.calc_split_amounts(db_module.get_split(sid),
-                                         db_module.get_disbursement_totals(tx_id))
     claim = db_module.get_claim(claim_id)
     tx = db_module.get_transaction(tx_id)
+    basis = _effective_split_basis(tx) if tx else db_module.get_disbursement_totals(tx_id)
+    include_recouped = not db_module.has_custom_recouped_splits(tx_id)
+    split = db_module.calc_split_amounts(db_module.get_split(sid), basis, include_recouped=include_recouped)
     row_html = render_template("partials/_split_row.html",
                                claim=claim, tx=tx, split=split, roles=ASSIGNEE_ROLES)
     placeholder = '<tr id="split-new-row-placeholder"></tr>'
-    total_html = _split_total_oob(tx_id)
+    total_html = _split_totals_only_oob(tx_id)
     return row_html + placeholder + total_html
 
 @app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/splits/<int:sid>/edit")
@@ -663,26 +998,28 @@ def split_edit_row(claim_id: int, tx_id: int, sid: int):
     if not split:
         abort(404)
     return render_template("partials/_split_edit.html",
-                           claim=claim, tx=tx, split=split, roles=ASSIGNEE_ROLES)
+                           claim=claim, tx=tx, split=split, roles=ASSIGNEE_ROLES,
+                           fee_recipients=db_module.get_all_fee_recipients())
 
 @app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/splits/<int:sid>", methods=["PUT"])
 @login_required
 def split_update(claim_id: int, tx_id: int, sid: int):
     data = _split_data_from_form()
     db_module.update_split(sid, data)
-    split = db_module.calc_split_amounts(db_module.get_split(sid),
-                                         db_module.get_disbursement_totals(tx_id))
     claim = db_module.get_claim(claim_id)
     tx = db_module.get_transaction(tx_id)
+    basis = _effective_split_basis(tx) if tx else db_module.get_disbursement_totals(tx_id)
+    include_recouped = not db_module.has_custom_recouped_splits(tx_id)
+    split = db_module.calc_split_amounts(db_module.get_split(sid), basis, include_recouped=include_recouped)
     row_html = render_template("partials/_split_row.html",
                                claim=claim, tx=tx, split=split, roles=ASSIGNEE_ROLES)
-    return row_html + _split_total_oob(tx_id)
+    return row_html + _split_totals_only_oob(tx_id)
 
 @app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/splits/<int:sid>", methods=["DELETE"])
 @login_required
 def split_delete(claim_id: int, tx_id: int, sid: int):
     db_module.delete_split(sid)
-    return _split_total_oob(tx_id)
+    return _split_totals_only_oob(tx_id)
 
 @app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/splits/seed", methods=["POST"])
 @login_required
@@ -694,9 +1031,16 @@ def split_seed(claim_id: int, tx_id: int):
     db_module.clone_splits_from_assignees(claim_id, tx_id)
     tx = db_module.get_transaction(tx_id)
     claim = db_module.get_claim(claim_id)
-    splits = db_module.get_splits_with_amounts(tx_id)
+    basis = _effective_split_basis(tx) if tx else db_module.get_disbursement_totals(tx_id)
+    has_custom_recouped = db_module.has_custom_recouped_splits(tx_id)
+    include_recouped = not has_custom_recouped
+    splits = [db_module.calc_split_amounts(s, basis, include_recouped=include_recouped)
+              for s in db_module.get_splits(tx_id)]
+    disburse_totals = basis
     return render_template("partials/_splits_section.html",
-                           claim=claim, tx=tx, splits=splits, roles=ASSIGNEE_ROLES)
+                           claim=claim, tx=tx, splits=splits,
+                           disburse_totals=disburse_totals, roles=ASSIGNEE_ROLES,
+                           has_custom_recouped=has_custom_recouped)
 
 @app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/splits/<int:sid>")
 @login_required
@@ -706,25 +1050,109 @@ def split_view_row(claim_id: int, tx_id: int, sid: int):
     split = db_module.get_split(sid)
     if not split:
         abort(404)
-    split = db_module.calc_split_amounts(split, tx)
+    basis = _effective_split_basis(tx) if tx else {}
+    include_recouped = not db_module.has_custom_recouped_splits(tx_id)
+    split = db_module.calc_split_amounts(split, basis, include_recouped=include_recouped)
     return render_template("partials/_split_row.html",
                            claim=claim, tx=tx, split=split, roles=ASSIGNEE_ROLES)
 
+def _effective_split_basis(tx: dict) -> dict:
+    """Return the fee totals dict to use for split amount calculations.
+
+    For Fee Invoice, the entire invoice amount is the fee — there are no
+    disbursements, so the normal disbursement totals would all be zero.
+    """
+    if (tx.get("type") or "").lower() == "fee invoice":
+        amount = float(tx.get("amount") or 0)
+        return {
+            "fee_owed": amount,
+            "fee_deferred": 0.0,
+            "fee_recouped": 0.0,
+            "net_to_insured": 0.0,
+            "to_vendors": 0.0,
+            "total_disbursed": 0.0,
+        }
+    return db_module.get_disbursement_totals(tx["id"])
+
+
 def _split_data_from_form() -> dict:
+    rid = request.form.get("recipient_id") or None
     return {
-        "role": request.form.get("role", "other"),
-        "name": request.form.get("name", "").strip(),
-        "split_pct": db_module._f(request.form.get("split_pct")),
+        "role":         request.form.get("role", "other"),
+        "name":         _recipient_name_from_id(rid),
+        "split_pct":    db_module._f(request.form.get("split_pct")),
+        "recipient_id": rid,
     }
 
-def _split_total_oob(tx_id: int) -> str:
-    splits = db_module.get_splits_with_amounts(tx_id)
+def _split_totals_only_oob(tx_id: int) -> str:
+    """Update just the split summary spans — no tbody replacement, no row flicker."""
+    tx     = db_module.get_transaction(tx_id)
+    basis  = _effective_split_basis(tx) if tx else db_module.get_disbursement_totals(tx_id)
+    include_recouped = not db_module.has_custom_recouped_splits(tx_id)
+    splits = [db_module.calc_split_amounts(s, basis, include_recouped=include_recouped)
+              for s in db_module.get_splits(tx_id)]
     total_pct = sum(s.get("split_pct") or 0 for s in splits)
     total_fee = sum(s.get("fee_amount") or 0 for s in splits)
     css = "color:var(--red)" if abs(total_pct - 100) > 0.01 and splits else ""
     return (
         f'<span id="split-total-pct" hx-swap-oob="true" style="{css}">{total_pct:,.2f}%</span>'
         f'<span id="split-total-fee" hx-swap-oob="true">${total_fee:,.2f}</span>'
+    )
+
+def _split_rows_oob(tx_id: int) -> str:
+    """Emit an OOB <tr> swap for each existing split row to refresh per-row amounts.
+
+    Called when disbursement totals change (fee_recouped, fee_deferred, etc.) so that
+    individual split rows reflect the updated basis without replacing the whole tbody.
+    """
+    tx = db_module.get_transaction(tx_id)
+    if not tx:
+        return ""
+    claim = db_module.get_claim(tx["claim_id"])
+    if not claim:
+        return ""
+    basis  = _effective_split_basis(tx)
+    include_recouped = not db_module.has_custom_recouped_splits(tx_id)
+    splits = [db_module.calc_split_amounts(s, basis, include_recouped=include_recouped)
+              for s in db_module.get_splits(tx_id)]
+    rows = ""
+    for split in splits:
+        row = render_template("partials/_split_row.html",
+                              claim=claim, tx=tx, split=split, roles=ASSIGNEE_ROLES)
+        # Add hx-swap-oob="true" so HTMX matches by id and swaps outerHTML
+        rows += row.replace("<tr ", '<tr hx-swap-oob="true" ', 1)
+    if not rows:
+        return ""
+    # Wrap in a hidden table so the browser parses <tr> in a valid table context.
+    # Without this, bare <tr hx-swap-oob> elements get stripped by the HTML parser
+    # and their content is injected as stray text into the primary swap target.
+    return f'<table style="display:none"><tbody>{rows}</tbody></table>'
+
+def _split_total_oob(tx_id: int) -> str:
+    """Full tbody replacement — only used by seed (replaces all rows at once)."""
+    tx    = db_module.get_transaction(tx_id)
+    basis = _effective_split_basis(tx) if tx else db_module.get_disbursement_totals(tx_id)
+    splits = [db_module.calc_split_amounts(s, basis) for s in db_module.get_splits(tx_id)]
+    total_pct = sum(s.get("split_pct") or 0 for s in splits)
+    total_fee = sum(s.get("fee_amount") or 0 for s in splits)
+    css = "color:var(--red)" if abs(total_pct - 100) > 0.01 and splits else ""
+    claim = db_module.get_claim(tx["claim_id"]) if tx else None
+    rows_html = ""
+    if claim and tx:
+        for split in splits:
+            rows_html += render_template("partials/_split_row.html",
+                                         claim=claim, tx=tx, split=split,
+                                         roles=ASSIGNEE_ROLES)
+    tbody_oob = (
+        f'<tbody id="split-tbody" hx-swap-oob="true">'
+        f'{rows_html}'
+        f'<tr id="split-new-row-placeholder"></tr>'
+        f'</tbody>'
+    )
+    return (
+        f'<span id="split-total-pct" hx-swap-oob="true" style="{css}">{total_pct:,.2f}%</span>'
+        f'<span id="split-total-fee" hx-swap-oob="true">${total_fee:,.2f}</span>'
+        + tbody_oob
     )
 
 
@@ -739,19 +1167,20 @@ def coverage_new_row(claim_id: int, tx_id: int):
     tx = db_module.get_transaction(tx_id)
     return render_template("partials/_coverage_edit.html",
                            claim=claim, tx=tx, cov=None,
-                           coverage_types=COVERAGE_TYPES)
+                           coverage_types=db_module.get_coverage_types())
 
 @app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/coverage", methods=["POST"])
 @login_required
 def coverage_create(claim_id: int, tx_id: int):
     data = _coverage_data_from_form()
+    db_module.ensure_coverage_type(data["coverage_type"])
     cid = db_module.create_coverage(tx_id, data)
     cov = db_module.get_coverage(cid)
     claim = db_module.get_claim(claim_id)
     tx = db_module.get_transaction(tx_id)
     row_html = render_template("partials/_coverage_row.html",
                                claim=claim, tx=tx, cov=cov,
-                               coverage_types=COVERAGE_TYPES)
+                               coverage_types=db_module.get_coverage_types())
     placeholder = '<tr id="coverage-new-row-placeholder"></tr>'
     return row_html + placeholder + _coverage_total_oob(tx_id)
 
@@ -765,19 +1194,20 @@ def coverage_edit_row(claim_id: int, tx_id: int, cid: int):
         abort(404)
     return render_template("partials/_coverage_edit.html",
                            claim=claim, tx=tx, cov=cov,
-                           coverage_types=COVERAGE_TYPES)
+                           coverage_types=db_module.get_coverage_types())
 
 @app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/coverage/<int:cid>", methods=["PUT"])
 @login_required
 def coverage_update(claim_id: int, tx_id: int, cid: int):
     data = _coverage_data_from_form()
+    db_module.ensure_coverage_type(data["coverage_type"])
     db_module.update_coverage(cid, data)
     cov = db_module.get_coverage(cid)
     claim = db_module.get_claim(claim_id)
     tx = db_module.get_transaction(tx_id)
     row_html = render_template("partials/_coverage_row.html",
                                claim=claim, tx=tx, cov=cov,
-                               coverage_types=COVERAGE_TYPES)
+                               coverage_types=db_module.get_coverage_types())
     return row_html + _coverage_total_oob(tx_id)
 
 @app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/coverage/<int:cid>", methods=["DELETE"])
@@ -796,7 +1226,7 @@ def coverage_view_row(claim_id: int, tx_id: int, cid: int):
         abort(404)
     return render_template("partials/_coverage_row.html",
                            claim=claim, tx=tx, cov=cov,
-                           coverage_types=COVERAGE_TYPES)
+                           coverage_types=db_module.get_coverage_types())
 
 def _coverage_data_from_form() -> dict:
     return {
@@ -805,9 +1235,15 @@ def _coverage_data_from_form() -> dict:
     }
 
 def _coverage_total_oob(tx_id: int) -> str:
-    covs = db_module.get_coverages(tx_id)
+    tx    = db_module.get_transaction(tx_id)
+    covs  = db_module.get_coverages(tx_id)
     total = sum(c.get("amount") or 0 for c in covs)
-    return f'<span id="coverage-total" hx-swap-oob="true">${total:,.2f}</span>'  # already has commas
+    tx_amt = (tx.get("amount") or 0) if tx else 0
+    pct    = total / tx_amt * 100 if tx_amt else 0
+    pct_class = "text-green" if 99.99 <= pct <= 100.01 else "text-red"
+    total_span = f'<span id="coverage-total" hx-swap-oob="true">${total:,.2f}</span>'
+    pct_span   = f'<span id="coverage-pct" hx-swap-oob="true" class="{pct_class}">{pct:.1f}%</span>'
+    return total_span + pct_span
 
 
 # ---------------------------------------------------------------------------
@@ -879,7 +1315,9 @@ def disbursement_update(claim_id: int, tx_id: int, did: int):
 def disbursement_delete(claim_id: int, tx_id: int, did: int):
     db_module.delete_disbursement(did)
     claim = db_module.get_claim(claim_id)
-    return _disburse_totals_oob(tx_id, claim)
+    # Also delete the splits panel placeholder row that lives alongside this disbursement row
+    panel_cleanup = f'<tr id="disburse-{did}-splits-panel" hx-swap-oob="delete"></tr>'
+    return _disburse_totals_oob(tx_id, claim) + panel_cleanup
 
 
 @app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/disbursements/<int:did>")
@@ -893,6 +1331,48 @@ def disbursement_view_row(claim_id: int, tx_id: int, did: int):
     vendors = db_module.get_all_vendors()
     return render_template("partials/_disbursement_row.html",
                            claim=claim, tx=tx, d=d, vendors=vendors)
+
+
+@app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/disbursements/<int:did>/toggle-client",
+           methods=["POST"])
+@login_required
+def disbursement_toggle_client(claim_id: int, tx_id: int, did: int):
+    """Toggle whether the client/recipient has received their funds."""
+    d = db_module.get_disbursement(did)
+    if not d:
+        abort(404)
+    data = dict(d)
+    data["client_received"] = 0 if d.get("client_received") else 1
+    db_module.update_disbursement(did, data)
+    claim = db_module.get_claim(claim_id)
+    tx = db_module.get_transaction(tx_id)
+    vendors = db_module.get_all_vendors()
+    d = db_module.get_disbursement(did)
+    row_html = render_template("partials/_disbursement_row.html",
+                               claim=claim, tx=tx, d=d, vendors=vendors)
+    return row_html + _disburse_totals_oob(tx_id, claim) + _check_status_oob(tx_id)
+
+
+@app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/disbursements/<int:did>/toggle-fee",
+           methods=["POST"])
+@login_required
+def disbursement_toggle_fee(claim_id: int, tx_id: int, did: int):
+    """Toggle fee collected: set to fee_owed, or back to 0 if already collected."""
+    d = db_module.get_disbursement(did)
+    if not d:
+        abort(404)
+    data = dict(d)
+    already_collected = (d.get("fee_collected") or 0) >= (d.get("fee_owed") or 0) > 0
+    data["fee_collected"] = 0 if already_collected else (d.get("fee_owed") or 0)
+    data["fee_deferred"] = 0
+    db_module.update_disbursement(did, data)
+    claim = db_module.get_claim(claim_id)
+    tx = db_module.get_transaction(tx_id)
+    vendors = db_module.get_all_vendors()
+    d = db_module.get_disbursement(did)
+    row_html = render_template("partials/_disbursement_row.html",
+                               claim=claim, tx=tx, d=d, vendors=vendors)
+    return row_html + _disburse_totals_oob(tx_id, claim) + _check_status_oob(tx_id)
 
 
 def _disbursement_data_from_form() -> dict:
@@ -918,6 +1398,27 @@ def _disbursement_data_from_form() -> dict:
 
 def _disburse_totals_oob(tx_id: int, claim: dict) -> str:
     t = db_module.get_disbursement_totals(tx_id)
+    tx = db_module.get_transaction(tx_id)
+    tx_amount = (tx or {}).get("amount") or 0
+    pct_html = ""
+    remaining_html = ""
+    if tx_amount:
+        pct = (t["total_disbursed"] or 0) / tx_amount * 100
+        if pct >= 99.99 and pct <= 100.01:
+            pct_cls = "pct-exact"
+        elif pct > 100.01:
+            pct_cls = "pct-over"
+        else:
+            pct_cls = "pct-under"
+        pct_html = f'<span id="disburse-total-pct" hx-swap-oob="true" class="disburse-pct {pct_cls}">{pct:.1f}%</span>'
+        remaining = tx_amount - (t["total_disbursed"] or 0)
+        if abs(remaining) < 0.005:
+            rem_style = "color:var(--green)"
+        elif remaining < 0:
+            rem_style = "color:var(--red)"
+        else:
+            rem_style = ""
+        remaining_html = f'<span id="disburse-remaining" hx-swap-oob="true" style="{rem_style}">${remaining:,.2f}</span>'
     return (
         f'<span id="disburse-total-disbursed" hx-swap-oob="true">${t["total_disbursed"]:,.2f}</span>'
         f'<span id="disburse-total-fee-owed" hx-swap-oob="true">${t["fee_owed"]:,.2f}</span>'
@@ -929,7 +1430,331 @@ def _disburse_totals_oob(tx_id: int, claim: dict) -> str:
         f'<span id="disburse-sidebar-fee-coll" hx-swap-oob="true">${t["fee_collected"]:,.2f}</span>'
         f'<span id="disburse-sidebar-deferred" hx-swap-oob="true">${t["fee_deferred"]:,.2f}</span>'
         f'<span id="disburse-sidebar-recouped" hx-swap-oob="true">${t["fee_recouped"]:,.2f}</span>'
-        + _split_total_oob(tx_id)
+        + pct_html
+        + remaining_html
+        + _split_totals_only_oob(tx_id)
+        + _split_rows_oob(tx_id)
+    )
+
+
+# ---------------------------------------------------------------------------
+# Disbursement Splits — HTMX fragments (per-disbursement custom payroll splits)
+# ---------------------------------------------------------------------------
+
+@app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/disbursements/<int:did>/splits-panel")
+@login_required
+def disburse_splits_panel(claim_id: int, tx_id: int, did: int):
+    claim = db_module.get_claim(claim_id)
+    tx = db_module.get_transaction(tx_id)
+    d = db_module.get_disbursement(did)
+    if not d:
+        abort(404)
+    splits = db_module.get_disbursement_splits(did)
+    return render_template("partials/_disburse_splits_panel.html",
+                           claim=claim, tx=tx, d=d, splits=splits,
+                           roles=ASSIGNEE_ROLES,
+                           fee_recipients=db_module.get_all_fee_recipients())
+
+
+@app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/disbursements/<int:did>/splits/activate",
+           methods=["POST"])
+@login_required
+def disburse_splits_activate(claim_id: int, tx_id: int, did: int):
+    db_module.seed_disbursement_splits_from_tx(did, tx_id)
+    d = db_module.get_disbursement(did)
+    claim = db_module.get_claim(claim_id)
+    tx = db_module.get_transaction(tx_id)
+    splits = db_module.get_disbursement_splits(did)
+    panel = render_template("partials/_disburse_splits_panel.html",
+                            claim=claim, tx=tx, d=d, splits=splits,
+                            roles=ASSIGNEE_ROLES,
+                            fee_recipients=db_module.get_all_fee_recipients())
+    return panel + _disburse_split_btn_oob(d, claim, tx)
+
+
+@app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/disbursements/<int:did>/splits/reset",
+           methods=["POST"])
+@login_required
+def disburse_splits_reset(claim_id: int, tx_id: int, did: int):
+    db_module.reset_disbursement_splits(did)
+    d = db_module.get_disbursement(did)
+    claim = db_module.get_claim(claim_id)
+    tx = db_module.get_transaction(tx_id)
+    panel = render_template("partials/_disburse_splits_panel.html",
+                            claim=claim, tx=tx, d=d, splits=[],
+                            roles=ASSIGNEE_ROLES,
+                            fee_recipients=db_module.get_all_fee_recipients())
+    return panel + _disburse_split_btn_oob(d, claim, tx)
+
+
+@app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/disbursements/<int:did>/splits/new-row")
+@login_required
+def disburse_split_new_row(claim_id: int, tx_id: int, did: int):
+    claim = db_module.get_claim(claim_id)
+    tx = db_module.get_transaction(tx_id)
+    d = db_module.get_disbursement(did)
+    return render_template("partials/_disburse_split_edit.html",
+                           claim=claim, tx=tx, d=d, split=None,
+                           roles=ASSIGNEE_ROLES,
+                           fee_recipients=db_module.get_all_fee_recipients())
+
+
+@app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/disbursements/<int:did>/splits",
+           methods=["POST"])
+@login_required
+def disburse_split_create(claim_id: int, tx_id: int, did: int):
+    rid = request.form.get("recipient_id") or None
+    data = {
+        "role":         request.form.get("role", "other"),
+        "name":         _recipient_name_from_id(rid),
+        "split_pct":    db_module._f(request.form.get("split_pct")),
+        "recipient_id": rid,
+    }
+    sid = db_module.create_disbursement_split(did, data)
+    d = db_module.get_disbursement(did)
+    claim = db_module.get_claim(claim_id)
+    tx = db_module.get_transaction(tx_id)
+    split = db_module.get_disbursement_split(sid)
+    row_html = render_template("partials/_disburse_split_row.html",
+                               claim=claim, tx=tx, d=d, split=split)
+    placeholder = f'<tr id="dsplit-new-row-{did}"></tr>'
+    return row_html + placeholder + _disburse_split_totals_oob(did)
+
+
+@app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/disbursements/<int:did>/splits/<int:sid>/edit")
+@login_required
+def disburse_split_edit_row(claim_id: int, tx_id: int, did: int, sid: int):
+    claim = db_module.get_claim(claim_id)
+    tx = db_module.get_transaction(tx_id)
+    d = db_module.get_disbursement(did)
+    split = db_module.get_disbursement_split(sid)
+    if not split:
+        abort(404)
+    return render_template("partials/_disburse_split_edit.html",
+                           claim=claim, tx=tx, d=d, split=split,
+                           roles=ASSIGNEE_ROLES,
+                           fee_recipients=db_module.get_all_fee_recipients())
+
+
+@app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/disbursements/<int:did>/splits/<int:sid>",
+           methods=["PUT"])
+@login_required
+def disburse_split_update(claim_id: int, tx_id: int, did: int, sid: int):
+    rid = request.form.get("recipient_id") or None
+    data = {
+        "role":         request.form.get("role", "other"),
+        "name":         _recipient_name_from_id(rid),
+        "split_pct":    db_module._f(request.form.get("split_pct")),
+        "recipient_id": rid,
+    }
+    db_module.update_disbursement_split(sid, data)
+    d = db_module.get_disbursement(did)
+    claim = db_module.get_claim(claim_id)
+    tx = db_module.get_transaction(tx_id)
+    split = db_module.get_disbursement_split(sid)
+    row_html = render_template("partials/_disburse_split_row.html",
+                               claim=claim, tx=tx, d=d, split=split)
+    return row_html + _disburse_split_totals_oob(did)
+
+
+@app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/disbursements/<int:did>/splits/<int:sid>",
+           methods=["DELETE"])
+@login_required
+def disburse_split_delete(claim_id: int, tx_id: int, did: int, sid: int):
+    db_module.delete_disbursement_split(sid)
+    return _disburse_split_totals_oob(did)
+
+
+@app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/disbursements/<int:did>/splits/<int:sid>")
+@login_required
+def disburse_split_view_row(claim_id: int, tx_id: int, did: int, sid: int):
+    claim = db_module.get_claim(claim_id)
+    tx = db_module.get_transaction(tx_id)
+    d = db_module.get_disbursement(did)
+    split = db_module.get_disbursement_split(sid)
+    if not split:
+        abort(404)
+    return render_template("partials/_disburse_split_row.html",
+                           claim=claim, tx=tx, d=d, split=split)
+
+
+def _disburse_split_totals_oob(did: int) -> str:
+    """OOB span updates for the disbursement splits mini-table footer."""
+    splits = db_module.get_disbursement_splits(did)
+    d = db_module.get_disbursement(did)
+    fee_owed = (d.get("fee_owed") or 0) if d else 0
+    total_pct = sum(s.get("split_pct") or 0 for s in splits)
+    total_amt = round(fee_owed * total_pct / 100, 2)
+    css = "color:var(--red)" if splits and abs(total_pct - 100) > 0.01 else ""
+    return (
+        f'<span id="dsplit-total-pct-{did}" hx-swap-oob="true" style="{css}">{total_pct:,.2f}%</span>'
+        f'<span id="dsplit-total-amt-{did}" hx-swap-oob="true">${total_amt:,.2f}</span>'
+    )
+
+
+def _disburse_split_btn_oob(d: dict, claim: dict, tx: dict) -> str:
+    """OOB update for the ⚙ icon button in the disbursement row after activate/reset."""
+    did = d["id"]
+    is_active = not d.get("use_check_splits", 1)
+    btn_cls = "btn-icon btn-toggle-on" if is_active else "btn-icon"
+    tooltip = "Custom splits active" if is_active else "Custom splits"
+    panel_url = url_for("disburse_splits_panel", claim_id=claim["id"], tx_id=tx["id"], did=did)
+    return (
+        f'<button id="dsplit-btn-{did}" hx-swap-oob="true"'
+        f' class="{btn_cls}"'
+        f' hx-get="{panel_url}"'
+        f' hx-target="#disburse-{did}-splits-panel"'
+        f' hx-swap="outerHTML"'
+        f' title="{tooltip}">⚙</button>'
+    )
+
+
+# ---------------------------------------------------------------------------
+# Recouped Fee Custom Splits — HTMX fragments
+# ---------------------------------------------------------------------------
+
+@app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/recouped-splits/activate",
+           methods=["POST"])
+@login_required
+def recouped_splits_activate(claim_id: int, tx_id: int):
+    db_module.seed_recouped_splits_from_tx(tx_id)
+    tx = db_module.get_transaction(tx_id)
+    claim = db_module.get_claim(claim_id)
+    basis = _effective_split_basis(tx) if tx else {}
+    splits = [db_module.calc_split_amounts(s, basis, include_recouped=False)
+              for s in db_module.get_splits(tx_id)]
+    recouped_splits = db_module.get_recouped_splits(tx_id)
+    section_html = render_template("partials/_splits_section.html",
+                                   claim=claim, tx=tx, splits=splits,
+                                   disburse_totals=basis, roles=ASSIGNEE_ROLES,
+                                   has_custom_recouped=True)
+    recouped_html = render_template("partials/_recouped_splits_section.html",
+                                    claim=claim, tx=tx,
+                                    recouped_splits=recouped_splits,
+                                    disburse_totals=basis)
+    oob_recouped = f'<div id="recouped-splits-section" hx-swap-oob="true">{recouped_html}</div>'
+    return section_html + oob_recouped
+
+
+@app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/recouped-splits/reset",
+           methods=["POST"])
+@login_required
+def recouped_splits_reset(claim_id: int, tx_id: int):
+    db_module.reset_recouped_splits(tx_id)
+    tx = db_module.get_transaction(tx_id)
+    claim = db_module.get_claim(claim_id)
+    basis = _effective_split_basis(tx) if tx else {}
+    splits = [db_module.calc_split_amounts(s, basis, include_recouped=True)
+              for s in db_module.get_splits(tx_id)]
+    section_html = render_template("partials/_splits_section.html",
+                                   claim=claim, tx=tx, splits=splits,
+                                   disburse_totals=basis, roles=ASSIGNEE_ROLES,
+                                   has_custom_recouped=False)
+    oob_recouped = '<div id="recouped-splits-section" hx-swap-oob="true"></div>'
+    return section_html + oob_recouped
+
+
+@app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/recouped-splits/new-row")
+@login_required
+def recouped_split_new_row(claim_id: int, tx_id: int):
+    claim = db_module.get_claim(claim_id)
+    tx = db_module.get_transaction(tx_id)
+    return render_template("partials/_recouped_split_edit.html",
+                           claim=claim, tx=tx, split=None,
+                           roles=ASSIGNEE_ROLES,
+                           fee_recipients=db_module.get_all_fee_recipients())
+
+
+@app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/recouped-splits",
+           methods=["POST"])
+@login_required
+def recouped_split_create(claim_id: int, tx_id: int):
+    rid = request.form.get("recipient_id") or None
+    data = {
+        "role":         request.form.get("role", "other"),
+        "name":         _recipient_name_from_id(rid),
+        "split_pct":    db_module._f(request.form.get("split_pct")),
+        "recipient_id": rid,
+    }
+    sid = db_module.create_recouped_split(tx_id, data)
+    split = db_module.get_recouped_split(sid)
+    claim = db_module.get_claim(claim_id)
+    tx = db_module.get_transaction(tx_id)
+    basis = _effective_split_basis(tx) if tx else {}
+    row_html = render_template("partials/_recouped_split_row.html",
+                               claim=claim, tx=tx, split=split, disburse_totals=basis)
+    placeholder = '<tr id="recouped-split-new-row-placeholder"></tr>'
+    return row_html + placeholder + _recouped_split_totals_oob(tx_id) + _split_totals_only_oob(tx_id)
+
+
+@app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/recouped-splits/<int:sid>/edit")
+@login_required
+def recouped_split_edit_row(claim_id: int, tx_id: int, sid: int):
+    claim = db_module.get_claim(claim_id)
+    tx = db_module.get_transaction(tx_id)
+    split = db_module.get_recouped_split(sid)
+    if not split:
+        abort(404)
+    return render_template("partials/_recouped_split_edit.html",
+                           claim=claim, tx=tx, split=split,
+                           roles=ASSIGNEE_ROLES,
+                           fee_recipients=db_module.get_all_fee_recipients())
+
+
+@app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/recouped-splits/<int:sid>",
+           methods=["PUT"])
+@login_required
+def recouped_split_update(claim_id: int, tx_id: int, sid: int):
+    rid = request.form.get("recipient_id") or None
+    data = {
+        "role":         request.form.get("role", "other"),
+        "name":         _recipient_name_from_id(rid),
+        "split_pct":    db_module._f(request.form.get("split_pct")),
+        "recipient_id": rid,
+    }
+    db_module.update_recouped_split(sid, data)
+    split = db_module.get_recouped_split(sid)
+    claim = db_module.get_claim(claim_id)
+    tx = db_module.get_transaction(tx_id)
+    basis = _effective_split_basis(tx) if tx else {}
+    row_html = render_template("partials/_recouped_split_row.html",
+                               claim=claim, tx=tx, split=split, disburse_totals=basis)
+    return row_html + _recouped_split_totals_oob(tx_id) + _split_totals_only_oob(tx_id)
+
+
+@app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/recouped-splits/<int:sid>",
+           methods=["DELETE"])
+@login_required
+def recouped_split_delete(claim_id: int, tx_id: int, sid: int):
+    db_module.delete_recouped_split(sid)
+    return _recouped_split_totals_oob(tx_id) + _split_totals_only_oob(tx_id)
+
+
+@app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/recouped-splits/<int:sid>")
+@login_required
+def recouped_split_view_row(claim_id: int, tx_id: int, sid: int):
+    claim = db_module.get_claim(claim_id)
+    tx = db_module.get_transaction(tx_id)
+    split = db_module.get_recouped_split(sid)
+    if not split:
+        abort(404)
+    basis = _effective_split_basis(tx) if tx else {}
+    return render_template("partials/_recouped_split_row.html",
+                           claim=claim, tx=tx, split=split, disburse_totals=basis)
+
+
+def _recouped_split_totals_oob(tx_id: int) -> str:
+    """OOB spans for the recouped splits section totals footer."""
+    recouped_splits = db_module.get_recouped_splits(tx_id)
+    tx = db_module.get_transaction(tx_id)
+    basis = _effective_split_basis(tx) if tx else {}
+    fee_recouped = basis.get("fee_recouped") or 0
+    total_pct = sum(s.get("split_pct") or 0 for s in recouped_splits)
+    total_amt = round(fee_recouped * total_pct / 100, 2)
+    css = "color:var(--red)" if recouped_splits and abs(total_pct - 100) > 0.01 else ""
+    return (
+        f'<span id="recouped-split-total-pct" hx-swap-oob="true" style="{css}">{total_pct:,.2f}%</span>'
+        f'<span id="recouped-split-total-fee" hx-swap-oob="true">${total_amt:,.2f}</span>'
     )
 
 
@@ -951,6 +1776,30 @@ def vendors_options():
     return jsonify([{"value": str(v["id"]), "text": v["name"]} for v in vendors])
 
 
+@app.route("/vendors/new-row")
+@login_required
+def vendor_new_row():
+    return render_template("partials/_vendor_edit.html", v=None)
+
+
+@app.route("/vendors/<int:vendor_id>/edit")
+@login_required
+def vendor_edit_row(vendor_id: int):
+    v = db_module.get_vendor(vendor_id)
+    if not v:
+        abort(404)
+    return render_template("partials/_vendor_edit.html", v=v)
+
+
+@app.route("/vendors/<int:vendor_id>")
+@login_required
+def vendor_view_row(vendor_id: int):
+    v = db_module.get_vendor(vendor_id)
+    if not v:
+        abort(404)
+    return render_template("partials/_vendor_row.html", v=v)
+
+
 @app.route("/vendors", methods=["POST"])
 @login_required
 def vendor_create():
@@ -966,12 +1815,13 @@ def vendor_create():
         vid = db_module.create_vendor(data)
     except Exception:
         return "Vendor name already exists", 409
-    vendor = db_module.get_vendor(vid)
+    v = db_module.get_vendor(vid)
     # If called from Tom Select inline creation, return JSON
     if request.headers.get("Accept", "").startswith("application/json"):
-        return jsonify({"value": str(vendor["id"]), "text": vendor["name"]})
-    vendors = db_module.get_all_vendors()
-    return render_template("vendors.html", vendors=vendors)
+        return jsonify({"value": str(v["id"]), "text": v["name"]})
+    row_html = render_template("partials/_vendor_row.html", v=v)
+    placeholder = '<tr id="vendor-new-row-placeholder"></tr>'
+    return row_html + placeholder
 
 
 @app.route("/vendors/<int:vendor_id>", methods=["PUT"])
@@ -984,16 +1834,15 @@ def vendor_update(vendor_id: int):
         "notes": request.form.get("notes", "").strip(),
     }
     db_module.update_vendor(vendor_id, data)
-    vendors = db_module.get_all_vendors()
-    return render_template("vendors.html", vendors=vendors)
+    v = db_module.get_vendor(vendor_id)
+    return render_template("partials/_vendor_row.html", v=v)
 
 
 @app.route("/vendors/<int:vendor_id>", methods=["DELETE"])
 @login_required
 def vendor_delete(vendor_id: int):
     db_module.delete_vendor(vendor_id)
-    vendors = db_module.get_all_vendors()
-    return render_template("vendors.html", vendors=vendors)
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -1053,6 +1902,196 @@ def fee_recipient_delete(rid: int):
     recipients = db_module.get_all_fee_recipients()
     return render_template("fee_recipients.html", recipients=recipients,
                            roles=ASSIGNEE_ROLES)
+
+
+# ---------------------------------------------------------------------------
+# Invoice Payments — HTMX fragments (on transaction detail page)
+# ---------------------------------------------------------------------------
+
+@app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/payments/new-row")
+@login_required
+def payment_new_row(claim_id: int, tx_id: int):
+    claim = db_module.get_claim(claim_id)
+    tx = db_module.get_transaction(tx_id)
+    claim_txs_for_select = db_module.get_claim_transactions_for_select(claim_id, exclude_tx_id=tx_id)
+    return render_template("partials/_inv_pay_edit.html",
+                           claim=claim, tx=tx,
+                           p=None,
+                           claim_txs_for_select=claim_txs_for_select)
+
+
+@app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/payments", methods=["POST"])
+@login_required
+def payment_create(claim_id: int, tx_id: int):
+    data = {
+        "date":        request.form.get("date", "").strip(),
+        "amount":      db_module._f(request.form.get("amount")),
+        "method":      request.form.get("method", "").strip(),
+        "reference":   request.form.get("reference", "").strip(),
+        "linked_tx_id": request.form.get("linked_tx_id") or None,
+        "notes":       request.form.get("notes", "").strip(),
+    }
+    pid = db_module.create_invoice_payment(tx_id, data)
+    p = db_module.get_invoice_payment(pid)
+    # Re-fetch with joined fields
+    payments = db_module.get_invoice_payments(tx_id)
+    p_full = next((x for x in payments if x["id"] == pid), p)
+    claim = db_module.get_claim(claim_id)
+    tx = db_module.get_transaction(tx_id)
+    row_html = render_template("partials/_inv_pay_row.html", claim=claim, tx=tx, p=p_full)
+    placeholder = '<tr id="inv-pay-new-row-placeholder"></tr>'
+    return row_html + placeholder + _inv_amounts_oob(tx_id, tx)
+
+
+@app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/payments/<int:pid>", methods=["DELETE"])
+@login_required
+def payment_delete(claim_id: int, tx_id: int, pid: int):
+    db_module.delete_invoice_payment(pid)
+    tx = db_module.get_transaction(tx_id)
+    return _inv_amounts_oob(tx_id, tx)
+
+
+def _inv_amounts_oob(tx_id: int, tx: dict) -> str:
+    """OOB updates for payment section total + sidebar paid/balance (called on payment add/delete)."""
+    payments = db_module.get_invoice_payments(tx_id)
+    total_paid = sum((p.get("amount") or 0) for p in payments)
+    invoice_amount = float(tx.get("amount") or 0) if tx else 0.0
+    balance = invoice_amount - total_paid
+    section_total = f'<span id="inv-pay-total" hx-swap-oob="true">{money_filter(total_paid)}</span>'
+    sidebar_paid    = f'<span id="inv-sidebar-paid" hx-swap-oob="true">{money_filter(total_paid)}</span>'
+    sidebar_balance = f'<span id="inv-sidebar-balance" hx-swap-oob="true">{money_filter(balance)}</span>'
+    return section_total + sidebar_paid + sidebar_balance
+
+
+def _check_toggle_area_html(claim_id: int, tx: dict) -> str:
+    """Return the <div id="check-toggle-area"> HTML for outerHTML swap on toggle routes."""
+    tx_id = tx["id"]
+    client_on = bool(tx.get("inv_client_paid"))
+    fee_on = bool(tx.get("inv_fee_received"))
+    released = client_on and fee_on
+    status_css = "status-released" if released else "status-inv-pending"
+    status_label = "Released" if released else "Pending"
+    client_cls = "btn-toggle btn-toggle-on" if client_on else "btn-toggle"
+    client_icon = "✓" if client_on else "○"
+    client_title = "Client paid — click to undo" if client_on else "Mark client as paid"
+    fee_cls = "btn-toggle btn-toggle-on" if fee_on else "btn-toggle"
+    fee_icon = "✓" if fee_on else "○"
+    fee_title = "Fee received — click to undo" if fee_on else "Mark fee as received"
+    toggle_url_client = url_for("toggle_inv_client", claim_id=claim_id, tx_id=tx_id)
+    toggle_url_fee = url_for("toggle_inv_fee", claim_id=claim_id, tx_id=tx_id)
+    return (
+        f'<div id="check-toggle-area">'
+        f'<div class="sidebar-value" style="font-size:14px">'
+        f'<span id="tx-sidebar-status" class="status-badge {status_css}">{status_label}</span>'
+        f'</div>'
+        f'<div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px">'
+        f'<button class="{client_cls}"'
+        f' hx-post="{toggle_url_client}"'
+        f' hx-target="#check-toggle-area"'
+        f' hx-swap="outerHTML"'
+        f' title="{client_title}">'
+        f'{client_icon} Client Paid'
+        f'</button>'
+        f'<button class="{fee_cls}"'
+        f' hx-post="{toggle_url_fee}"'
+        f' hx-target="#check-toggle-area"'
+        f' hx-swap="outerHTML"'
+        f' title="{fee_title}">'
+        f'{fee_icon} Fee Received'
+        f'</button>'
+        f'</div>'
+        f'</div>'
+    )
+
+
+def _check_row_status_oob(tx_id: int, tx: dict) -> str:
+    """OOB update for the status badge in the claim detail transaction row."""
+    released = bool(tx.get("inv_client_paid")) and bool(tx.get("inv_fee_received"))
+    css = "status-released" if released else "status-inv-pending"
+    label = "Released" if released else "Pending"
+    return (f'<span id="tx-status-{tx_id}" hx-swap-oob="true" '
+            f'class="status-badge {css}">{label}</span>')
+
+
+def _check_status_oob(tx_id: int) -> str:
+    """OOB spans updating sidebar and tx-row status based on disbursement client_received state."""
+    disbursements = db_module.get_disbursements(tx_id)
+    released = bool(disbursements) and all(d.get("client_received") for d in disbursements)
+    css = "status-released" if released else "status-inv-pending"
+    label = "Released" if released else "Pending"
+    return (
+        f'<span id="tx-sidebar-status" hx-swap-oob="true" class="status-badge {css}">{label}</span>'
+        f'<span id="tx-status-{tx_id}" hx-swap-oob="true" class="status-badge {css}">{label}</span>'
+    )
+
+
+# ---------------------------------------------------------------------------
+# Check status toggles (carrier / draw / escrow endorsed)
+# ---------------------------------------------------------------------------
+
+@app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/toggle-inv-client", methods=["POST"])
+@login_required
+def toggle_inv_client(claim_id: int, tx_id: int):
+    tx = db_module.get_transaction(tx_id)
+    if not tx:
+        abort(404)
+    data = dict(tx)
+    data["inv_client_paid"] = 0 if tx.get("inv_client_paid") else 1
+    db_module.update_transaction(tx_id, data)
+    tx = db_module.get_transaction(tx_id)
+    return _check_toggle_area_html(claim_id, tx) + _check_row_status_oob(tx_id, tx)
+
+
+@app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/toggle-inv-fee", methods=["POST"])
+@login_required
+def toggle_inv_fee(claim_id: int, tx_id: int):
+    tx = db_module.get_transaction(tx_id)
+    if not tx:
+        abort(404)
+    data = dict(tx)
+    data["inv_fee_received"] = 0 if tx.get("inv_fee_received") else 1
+    db_module.update_transaction(tx_id, data)
+    tx = db_module.get_transaction(tx_id)
+    return _check_toggle_area_html(claim_id, tx) + _check_row_status_oob(tx_id, tx)
+
+
+# ---------------------------------------------------------------------------
+# Invoice Deferred Links — HTMX fragments (on transaction detail page)
+# ---------------------------------------------------------------------------
+
+@app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/deferred-links/new-row")
+@login_required
+def deferred_link_new_row(claim_id: int, tx_id: int):
+    claim = db_module.get_claim(claim_id)
+    tx = db_module.get_transaction(tx_id)
+    claim_txs_for_select = db_module.get_claim_transactions_for_select(claim_id, exclude_tx_id=tx_id)
+    return render_template("partials/_deferred_link_edit.html",
+                           claim=claim, tx=tx,
+                           claim_txs_for_select=claim_txs_for_select)
+
+
+@app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/deferred-links", methods=["POST"])
+@login_required
+def deferred_link_create(claim_id: int, tx_id: int):
+    deferred_tx_id = request.form.get("deferred_tx_id")
+    if not deferred_tx_id:
+        return "deferred_tx_id required", 400
+    lid = db_module.create_invoice_deferred_link(tx_id, int(deferred_tx_id))
+    links = db_module.get_invoice_deferred_links(tx_id)
+    link = next((x for x in links if x["id"] == lid), None)
+    claim = db_module.get_claim(claim_id)
+    tx = db_module.get_transaction(tx_id)
+    row_html = render_template("partials/_deferred_link_row.html", claim=claim, tx=tx, link=link)
+    placeholder = '<tr id="deferred-link-new-row-placeholder"></tr>'
+    return row_html + placeholder
+
+
+@app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/deferred-links/<int:lid>",
+           methods=["DELETE"])
+@login_required
+def deferred_link_delete(claim_id: int, tx_id: int, lid: int):
+    db_module.delete_invoice_deferred_link(lid)
+    return ""
 
 
 # ---------------------------------------------------------------------------

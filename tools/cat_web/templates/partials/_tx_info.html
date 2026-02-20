@@ -4,35 +4,95 @@
       <span class="label">Date</span>
       <span class="value">{{ tx.date or '—' }}</span>
     </div>
-    {% if tx.check_number %}
-    <div class="header-field">
-      <span class="label">Check #</span>
-      <span class="value bold">{{ tx.check_number }}</span>
-    </div>
-    {% endif %}
-    {% if tx.received_date %}
-    <div class="header-field">
-      <span class="label">Received</span>
-      <span class="value">{{ tx.received_date }}</span>
-    </div>
-    {% endif %}
-    {% if tx.payer %}
-    <div class="header-field">
-      <span class="label">Payer</span>
-      <span class="value">{{ tx.payer }}</span>
-    </div>
-    {% endif %}
-    {% if tx.payees_text %}
-    <div class="header-field" style="max-width:320px">
-      <span class="label">Payees</span>
-      <span class="value text-small">{{ tx.payees_text }}</span>
-    </div>
-    {% endif %}
-    {% if tx.endorsed %}
-    <div class="header-field">
-      <span class="label">Endorsed</span>
-      <span class="value">Yes</span>
-    </div>
+    {% set is_fee_invoice = (tx.type or '')|lower == 'fee invoice' %}
+    {% if is_fee_invoice %}
+      {% if tx.invoice_number %}
+      <div class="header-field">
+        <span class="label">Invoice #</span>
+        <span class="value bold">{{ tx.invoice_number }}</span>
+      </div>
+      {% endif %}
+      <div class="header-field">
+        <span class="label">Invoice For</span>
+        <span class="value">
+          {{- (tx.inv_for or 'insured') | capitalize -}}
+          {%- if tx.inv_for == 'vendor' and tx.inv_vendor_name %}: {{ tx.inv_vendor_name }}{% endif %}
+        </span>
+      </div>
+    {% else %}
+      {% if tx.check_number %}
+      <div class="header-field">
+        <span class="label">Check #</span>
+        <span class="value bold">{{ tx.check_number }}</span>
+      </div>
+      {% endif %}
+      {% if tx.received_date %}
+      <div class="header-field">
+        <span class="label">Received</span>
+        <span class="value">{{ tx.received_date }}</span>
+      </div>
+      {% endif %}
+      {% if tx.payer %}
+      <div class="header-field">
+        <span class="label">Payer</span>
+        <span class="value">{{ tx.payer }}</span>
+      </div>
+      {% endif %}
+      {% if tx.payees_text %}
+      <div class="header-field" style="max-width:320px">
+        <span class="label">Payees</span>
+        <span class="value text-small">{{ tx.payees_text }}</span>
+      </div>
+      {% endif %}
+      {% if tx.endorsed %}
+      <div class="header-field">
+        <span class="label">Endorsed</span>
+        <span class="value">Yes</span>
+      </div>
+      {% endif %}
+      {% if tx.linked_escrow_id %}
+      <div class="header-field">
+        <span class="label">Linked Escrow</span>
+        <span class="value text-small">Escrow #{{ tx.linked_escrow_id }}</span>
+      </div>
+      {% endif %}
+      {% set _tx_type = (tx.type or '')|lower %}
+      {% set _claim_type_pm = {
+           'carrier': claim.proc_method_carrier,
+           'draw':    claim.proc_method_draw,
+           'escrow':  claim.proc_method_escrow,
+         }.get(_tx_type) %}
+      {% set _hardcoded = {'carrier':'iink','draw':'iink','escrow':'sent_to_client','escrow endorsed':'iink'}.get(_tx_type) %}
+      {% set eff_method = tx.proc_method or _claim_type_pm or _hardcoded %}
+      {% if eff_method %}
+      {% set method_labels = {'iink':'iink','sent_to_client':'Sent to Client','wire':'Wire / ACH'} %}
+      <div class="header-field">
+        <span class="label">Processed Via</span>
+        <span class="value">
+          {{ method_labels.get(eff_method, eff_method) }}
+          {% if tx.proc_method %}
+            <span class="text-muted text-small">(override)</span>
+          {% elif not _claim_type_pm and _hardcoded %}
+            <span class="text-muted text-small">(default)</span>
+          {% endif %}
+        </span>
+      </div>
+      {% if eff_method == 'sent_to_client' %}
+        {% if tx.proc_fee_invoice_id %}
+        <div class="header-field">
+          <span class="label">Fee Invoice</span>
+          <span class="value text-green">
+            {% if tx.proc_fee_inv_number %}#{{ tx.proc_fee_inv_number }}{% else %}Linked{% endif %}
+          </span>
+        </div>
+        {% elif tx.fee_owed %}
+        <div class="header-field">
+          <span class="label">Fee Invoice</span>
+          <span class="value" style="color:var(--amber, #d97706)">&#9888; Not linked</span>
+        </div>
+        {% endif %}
+      {% endif %}
+      {% endif %}
     {% endif %}
     {% if tx.void %}
     <div class="header-field">
@@ -44,12 +104,6 @@
     <div class="header-field" style="max-width:360px">
       <span class="label">Notes</span>
       <span class="value text-small text-muted">{{ tx.notes }}</span>
-    </div>
-    {% endif %}
-    {% if tx.linked_escrow_id %}
-    <div class="header-field">
-      <span class="label">Linked Escrow</span>
-      <span class="value text-small">Escrow #{{ tx.linked_escrow_id }}</span>
     </div>
     {% endif %}
   </div>

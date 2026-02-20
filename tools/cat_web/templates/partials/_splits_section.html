@@ -28,7 +28,7 @@
       </tbody>
     </table>
   </div>
-  <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap">
+  <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap; align-items:center">
     <button class="btn btn-ghost btn-sm"
             hx-get="{{ url_for('split_new_row', claim_id=claim.id, tx_id=tx.id) }}"
             hx-target="#split-new-row-placeholder"
@@ -42,5 +42,27 @@
             hx-confirm="Reset splits from claim defaults? This will replace all current splits.">
       ↺ Reset from Claim Defaults
     </button>
+    {% if (disburse_totals.fee_recouped or 0) > 0 %}
+      {% set _has_recouped = has_custom_recouped | default(false) %}
+      <span style="border-left:1px solid var(--border); margin-left:4px; padding-left:12px">
+        {% if _has_recouped %}
+          <span class="text-small text-muted">Recouped split overridden</span>
+          <button class="btn btn-ghost btn-sm"
+                  hx-post="{{ url_for('recouped_splits_reset', claim_id=claim.id, tx_id=tx.id) }}"
+                  hx-target="#splits-section"
+                  hx-swap="innerHTML"
+                  hx-confirm="Reset recouped splits to use main split percentages?">
+            ↺ Reset to default
+          </button>
+        {% else %}
+          <button class="btn btn-ghost btn-sm"
+                  hx-post="{{ url_for('recouped_splits_activate', claim_id=claim.id, tx_id=tx.id) }}"
+                  hx-target="#splits-section"
+                  hx-swap="innerHTML">
+            + Override recouped split
+          </button>
+        {% endif %}
+      </span>
+    {% endif %}
   </div>
 </section>

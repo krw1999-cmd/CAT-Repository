@@ -31,12 +31,19 @@
   <div class="detail-main">
 
     {# Coverage allocation — only for check types #}
-    {% set check_types = ['escrow', 'escrow endorsed', 'carrier', 'draw'] %}
+    {% set check_types = ['escrow', 'escrow endorsed', 'carrier'] %}
     {% if (tx.type or '')|lower in check_types %}
     <section class="section">
       <div class="section-header">
         <h3>Coverage Allocation</h3>
-        <span class="text-muted text-small">Total: <strong id="coverage-total">{{ (coverages|sum(attribute='amount')) | money }}</strong></span>
+        {% set cov_total = (coverages|sum(attribute='amount')) %}
+        {% set tx_amt = (tx.amount or 0) %}
+        {% set cov_pct = (cov_total / tx_amt * 100) if tx_amt else 0 %}
+        <span class="text-muted text-small">
+          Total: <strong id="coverage-total">{{ cov_total | money }}</strong>
+          &nbsp;·&nbsp;
+          <strong id="coverage-pct" class="{{ 'text-green' if (cov_pct >= 99.99 and cov_pct <= 100.01) else 'text-red' }}">{{ "%.1f"|format(cov_pct) }}%</strong> of check
+        </span>
       </div>
       <div class="table-wrap">
         <table class="table table-compact">
@@ -44,6 +51,7 @@
             <tr>
               <th>Coverage</th>
               <th class="num">Amount</th>
+              <th class="num">% of Check</th>
               <th class="actions-col"></th>
             </tr>
           </thead>
@@ -65,37 +73,135 @@
     {% endif %}
 
     {# ── Disbursements ─────────────────────────────────────────────────────── #}
-    {% if (tx.type or '')|lower in check_types %}
+    {% set disburse_types = ['escrow', 'escrow endorsed', 'carrier', 'draw'] %}
+    {% if (tx.type or '')|lower in disburse_types %}
     {% include "partials/_disbursements_section.html" %}
     {% endif %}
 
-    {# ── Linked Escrow Warning (Draw transactions only) ─────────────────────── #}
-    {% if linked_escrow and escrow_disbursements %}
+    {# ── Cumulative Escrow Checklist (Draw transactions only) ───────────────── #}
+    {% if (tx.type or '')|lower == 'draw' %}
     <section class="section">
       <details class="escrow-warning-card" open>
         <summary>
-          <strong>Planned from Escrow #{{ linked_escrow.sequence_number or linked_escrow.id }}</strong>
-          ({{ linked_escrow.date or '?' }}, {{ (linked_escrow.amount or 0) | money }})
-          — checklist of planned disbursements
+          <strong>Escrow Planned vs. Paid</strong>
+          <span class="text-muted text-small">
+            — cumulative across all escrow &amp; draw checks on this claim
+          </span>
         </summary>
-        <div class="escrow-checklist">
-          {% for ed in escrow_disbursements %}
-          {% set is_covered = ed.recipient_name|lower in covered_recipients %}
-          <div class="escrow-check-item {{ 'covered' if is_covered else 'missing' }}">
-            <span class="check-icon">{{ '✓' if is_covered else '✗' }}</span>
-            <span class="check-label">
-              {{ ed.recipient_name or '—' }}
-              <span class="text-muted text-small">
-                ({{ ed.recipient_type }}, {{ (ed.amount or 0) | money }})
-              </span>
-            </span>
-            {% if not is_covered %}
-            <span class="check-missing-note">Not yet in this draw's disbursements</span>
-            {% endif %}
-          </div>
-          {% endfor %}
-        </div>
+        {% if escrow_checklist %}
+        <table class="table table-compact" style="margin-top:8px">
+          <thead>
+            <tr>
+              <th>Recipient</th><th>Type</th>
+              <th class="num">Planned</th>
+              <th class="num">Paid</th>
+              <th class="num">Fee</th>
+              <th class="num">Remaining</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in escrow_checklist %}
+            {% set rem = item.remaining %}
+            {% set row_cls = 'escrow-row-done' if rem <= 0.005
+                        else ('escrow-row-partial' if item.paid > 0
+                        else 'escrow-row-missing') %}
+            <tr class="{{ row_cls }}">
+              <td>
+                {{ '✓' if rem <= 0.005 else ('◑' if item.paid > 0 else '✗') }}
+                {{ item.recipient_name or '—' }}
+              </td>
+              <td class="text-small text-muted capitalize">{{ item.recipient_type }}</td>
+              <td class="num">{{ item.planned | money }}</td>
+              <td class="num">{{ item.paid | money }}</td>
+              <td class="num">{{ item.fee_owed | money }}</td>
+              <td class="num {% if rem > 0.005 %}text-red{% endif %}">
+                {{ item.remaining | money }}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <p class="text-muted text-small" style="padding:8px 0">
+          No escrow checks found for this claim.
+        </p>
+        {% endif %}
       </details>
+    </section>
+    {% endif %}
+
+    {# ── Linked Deferred Fees (Fee Invoice only) ─────────────────────────── #}
+    {% if (tx.type or '')|lower == 'fee invoice' %}
+    <section class="section">
+      <div class="section-header">
+        <h3>Linked Deferred Fees</h3>
+        <span class="text-muted text-small">
+          Total deferred: <strong>{{ invoice_deferred_links|sum(attribute='deferred') | money }}</strong>
+        </span>
+      </div>
+      <div class="table-wrap">
+        <table class="table table-compact">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Type</th>
+              <th>Date</th>
+              <th class="num">Check Amt</th>
+              <th class="num">Deferred</th>
+              <th class="actions-col"></th>
+            </tr>
+          </thead>
+          <tbody id="deferred-link-tbody">
+            {% for link in invoice_deferred_links %}
+              {% include "partials/_deferred_link_row.html" %}
+            {% endfor %}
+            <tr id="deferred-link-new-row-placeholder"></tr>
+          </tbody>
+        </table>
+      </div>
+      <button class="btn btn-ghost btn-sm"
+              hx-get="{{ url_for('deferred_link_new_row', claim_id=claim.id, tx_id=tx.id) }}"
+              hx-target="#deferred-link-new-row-placeholder"
+              hx-swap="outerHTML">
+        + Link Deferred Fee
+      </button>
+    </section>
+
+    {# ── Invoice Payments (Fee Invoice only) ──────────────────────────────── #}
+    <section class="section">
+      <div class="section-header">
+        <h3>Invoice Payments</h3>
+        <span class="text-muted text-small">
+          Paid: <strong id="inv-pay-total">{{ invoice_payments|sum(attribute='amount') | money }}</strong>
+          of {{ (tx.amount or 0) | money }}
+        </span>
+      </div>
+      <div class="table-wrap">
+        <table class="table table-compact">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Method</th>
+              <th class="num">Amount</th>
+              <th>Reference</th>
+              <th>Recouped From</th>
+              <th class="actions-col"></th>
+            </tr>
+          </thead>
+          <tbody id="inv-pay-tbody">
+            {% for p in invoice_payments %}
+              {% include "partials/_inv_pay_row.html" %}
+            {% endfor %}
+            <tr id="inv-pay-new-row-placeholder"></tr>
+          </tbody>
+        </table>
+      </div>
+      <button class="btn btn-ghost btn-sm"
+              hx-get="{{ url_for('payment_new_row', claim_id=claim.id, tx_id=tx.id) }}"
+              hx-target="#inv-pay-new-row-placeholder"
+              hx-swap="outerHTML">
+        + Add Payment
+      </button>
     </section>
     {% endif %}
 
@@ -104,11 +210,63 @@
       {% include "partials/_splits_section.html" %}
     </div>
 
+    {# ── Recouped Fee Distribution (only when override is active) ────────── #}
+    <div id="recouped-splits-section">
+      {% if has_custom_recouped %}
+        {% include "partials/_recouped_splits_section.html" %}
+      {% endif %}
+    </div>
+
   </div>
 
   {# ── Right sidebar ────────────────────────────────────────────────────────── #}
   <div class="detail-sidebar">
     <div class="card">
+
+    {% if (tx.type or '')|lower == 'fee invoice' %}
+      {# ── Fee Invoice sidebar ──────────────────────────────────────────────── #}
+      {% set inv_paid = invoice_payments|sum(attribute='amount') %}
+      {% set inv_amount = (tx.amount or 0) %}
+      {% set inv_balance = inv_amount - inv_paid %}
+
+      <div class="sidebar-label">Invoice Amount</div>
+      <div class="sidebar-value">{{ inv_amount | money }}</div>
+
+      <div class="sidebar-label">Status</div>
+      <div class="sidebar-value" style="font-size:14px">
+        {% if tx.void %}
+          <span class="status-badge status-void">Void</span>
+        {% elif inv_paid >= inv_amount - 0.005 and inv_amount > 0 %}
+          <span class="status-badge status-released">Paid</span>
+        {% elif inv_paid > 0 %}
+          <span class="status-badge status-inv-partial">Partial</span>
+        {% else %}
+          <span class="status-badge status-inv-unpaid">Unpaid</span>
+        {% endif %}
+      </div>
+
+      <div class="sidebar-divider"></div>
+
+      <div class="sidebar-label">Amount Paid</div>
+      <div class="sidebar-value {% if inv_paid > 0 %}text-green{% endif %}">
+        <span id="inv-sidebar-paid">{{ inv_paid | money }}</span>
+      </div>
+
+      <div class="sidebar-label">Balance</div>
+      <div class="sidebar-value {% if inv_balance > 0.005 %}highlight{% endif %}">
+        <span id="inv-sidebar-balance">{{ inv_balance | money }}</span>
+      </div>
+
+      {% if invoice_deferred_links %}
+      <div class="sidebar-divider"></div>
+      <div class="sidebar-label">Total Deferred</div>
+      <div class="sidebar-value">
+        {{ invoice_deferred_links|sum(attribute='deferred') | money }}
+      </div>
+      {% endif %}
+
+    {% else %}
+      {# ── Check sidebar ────────────────────────────────────────────────────── #}
       <div class="sidebar-label">Check Amount</div>
       <div class="sidebar-value">{{ (tx.amount or 0) | money }}</div>
 
@@ -118,7 +276,8 @@
         {% if is_escrow_type %}
           <span class="status-badge status-planned">Planned / Hypothetical</span>
         {% else %}
-          <span class="status-badge status-released">Released</span>
+          {% set all_rcvd = disbursements|length > 0 and disbursements|selectattr('client_received')|list|length == disbursements|length %}
+          <span id="tx-sidebar-status" class="status-badge {{ 'status-released' if all_rcvd else 'status-inv-pending' }}">{{ 'Released' if all_rcvd else 'Pending' }}</span>
         {% endif %}
       </div>
 
@@ -163,6 +322,8 @@
       {% else %}
       <span id="disburse-sidebar-recouped" style="display:none">$0.00</span>
       {% endif %}
+
+    {% endif %}
     </div>
   </div>
 

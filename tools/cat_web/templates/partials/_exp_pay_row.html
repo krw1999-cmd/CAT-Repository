@@ -1,0 +1,33 @@
+<tr id="exp-pay-{{ p.id }}">
+  <td class="nowrap">{{ p.date or '—' }}</td>
+  <td>
+    {% if p.paid_by == 'wp' %}
+      <span class="badge-pill badge-vendor">WP</span>
+    {% else %}
+      <span class="badge-pill badge-insured">Client</span>
+    {% endif %}
+  </td>
+  <td class="num">{{ (p.amount or 0) | money }}</td>
+  <td class="text-small">
+    {% if p.method == 'check' %}Check
+    {% elif p.method == 'ach' %}ACH
+    {% elif p.method == 'cc' %}CC
+    {% elif p.method %}{{ p.method | capitalize }}
+    {% else %}—{% endif %}
+  </td>
+  <td class="text-small">{{ p.reference or '—' }}</td>
+  <td class="text-small text-muted">{{ p.notes or '—' }}</td>
+  <td class="actions-col">
+    <button class="btn-icon"
+            hx-get="{{ url_for('exp_pay_edit_row', claim_id=claim.id, exp_id=expense.id, pid=p.id) }}"
+            hx-target="#exp-pay-{{ p.id }}"
+            hx-swap="outerHTML"
+            title="Edit">✎</button>
+    <button class="btn-icon btn-icon-danger"
+            hx-delete="{{ url_for('exp_pay_delete', claim_id=claim.id, exp_id=expense.id, pid=p.id) }}"
+            hx-target="#exp-pay-{{ p.id }}"
+            hx-swap="outerHTML"
+            hx-confirm="Delete this payment?"
+            title="Delete">✕</button>
+  </td>
+</tr>

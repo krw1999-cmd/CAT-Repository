@@ -1,0 +1,78 @@
+{% set c_amt = expense.client_amount or 0 %}
+{% set w_amt = expense.wp_amount     or 0 %}
+{% if c_amt > 0 and w_amt > 0 %}
+  {% set exp_type = 'split' %}
+{% elif c_amt > 0 %}
+  {% set exp_type = 'client' %}
+{% elif w_amt > 0 %}
+  {% set exp_type = 'wp' %}
+{% else %}
+  {% set exp_type = '' %}
+{% endif %}
+<div class="card claim-header">
+  <div class="header-grid">
+    {% if expense.invoice_date %}
+    <div class="header-field">
+      <span class="label">Invoice Date</span>
+      <span class="value">{{ expense.invoice_date }}</span>
+    </div>
+    {% endif %}
+    {% if expense.invoice_number %}
+    <div class="header-field">
+      <span class="label">Invoice #</span>
+      <span class="value bold">{{ expense.invoice_number }}</span>
+    </div>
+    {% endif %}
+    {% if expense.payee_name %}
+    <div class="header-field">
+      <span class="label">Payee</span>
+      <span class="value bold">
+        {{ expense.payee_name }}
+        {% if expense.vendor_name %}
+          <span class="text-muted text-small">(vendor)</span>
+        {% endif %}
+      </span>
+    </div>
+    {% endif %}
+    <div class="header-field">
+      <span class="label">Type</span>
+      <span class="value">
+        {% if exp_type == 'client' %}
+          <span class="badge-pill badge-insured">Client</span>
+        {% elif exp_type == 'wp' %}
+          <span class="badge-pill badge-vendor">WP</span>
+        {% elif exp_type == 'split' %}
+          <span class="badge-pill" style="background:#f3f4f6;color:#374151">Split</span>
+        {% else %}
+          <span class="text-muted">—</span>
+        {% endif %}
+      </span>
+    </div>
+    {% if expense.reason %}
+    <div class="header-field" style="max-width:320px">
+      <span class="label">Reason</span>
+      <span class="value text-small">{{ expense.reason }}</span>
+    </div>
+    {% endif %}
+    <div class="header-field">
+      <span class="label">Invoice Amount</span>
+      <span class="value">{{ (expense.invoice_amount or 0) | money }}</span>
+    </div>
+    <div class="header-field">
+      <span class="label">Client Owes</span>
+      <span class="value">{{ (expense.client_amount or 0) | money }}</span>
+    </div>
+    <div class="header-field">
+      <span class="label">WP Owes</span>
+      <span class="value">{{ (expense.wp_amount or 0) | money }}</span>
+    </div>
+  </div>
+  <div class="header-actions">
+    <button class="btn btn-ghost btn-sm"
+            hx-get="{{ url_for('exp_info_edit', claim_id=claim.id, exp_id=expense.id) }}"
+            hx-target="#exp-info"
+            hx-swap="innerHTML">
+      Edit
+    </button>
+  </div>
+</div>

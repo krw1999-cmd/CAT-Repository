@@ -1,14 +1,14 @@
-{% set is_new = assignee is none %}
-{% set row_id = "assignee-new-row-placeholder" if is_new else "assignee-" ~ assignee.id %}
-{% set save_url = url_for('assignee_create', claim_id=claim.id) if is_new else url_for('assignee_update', claim_id=claim.id, aid=assignee.id) %}
+{% set is_new = split is none %}
+{% set row_id = "recouped-split-new-row-placeholder" if is_new else "recouped-split-" ~ split.id %}
+{% set save_url = url_for('recouped_split_create', claim_id=claim.id, tx_id=tx.id) if is_new else url_for('recouped_split_update', claim_id=claim.id, tx_id=tx.id, sid=split.id) %}
 {% set save_method = "post" if is_new else "put" %}
-{% set form_id = "assignee-form-" ~ row_id %}
+{% set form_id = "recouped-split-form-" ~ row_id %}
 
 <tr id="{{ row_id }}">
   <td>
     <select name="role" class="input-sm select-sm" form="{{ form_id }}">
       {% for r in roles %}
-      <option value="{{ r }}" {% if assignee and assignee.role == r %}selected{% endif %}>{{ r }}</option>
+      <option value="{{ r }}" {% if split and split.role == r %}selected{% endif %}>{{ r }}</option>
       {% endfor %}
     </select>
   </td>
@@ -16,27 +16,25 @@
     <select name="recipient_id" class="input-sm select-sm" form="{{ form_id }}" style="min-width:140px">
       <option value="">— select —</option>
       {% for r in fee_recipients %}
-      <option value="{{ r.id }}"
-              {% if assignee and assignee.recipient_id == r.id %}selected{% endif %}>
-        {{ r.name }}
-      </option>
+      <option value="{{ r.id }}" {% if split and split.recipient_id == r.id %}selected{% endif %}>{{ r.name }}</option>
       {% endfor %}
     </select>
   </td>
   <td>
     <input type="number" name="split_pct" step="0.01" class="input-sm input-num"
-           value="{{ assignee.split_pct if assignee else '' }}" form="{{ form_id }}">
+           value="{{ split.split_pct if split else '' }}" form="{{ form_id }}">
   </td>
+  <td class="num text-muted">—</td>
   <td class="actions-col">
     <button class="btn btn-primary btn-sm" form="{{ form_id }}" type="submit">Save</button>
     {% if is_new %}
     <button type="button" class="btn btn-ghost btn-sm"
-            onclick="document.getElementById('assignee-new-row-placeholder').outerHTML='<tr id=&quot;assignee-new-row-placeholder&quot;></tr>'">
+            onclick="document.getElementById('recouped-split-new-row-placeholder').outerHTML='<tr id=&quot;recouped-split-new-row-placeholder&quot;></tr>'">
       ✕
     </button>
     {% else %}
     <button type="button" class="btn btn-ghost btn-sm"
-            hx-get="{{ url_for('assignee_view_row', claim_id=claim.id, aid=assignee.id) }}"
+            hx-get="{{ url_for('recouped_split_view_row', claim_id=claim.id, tx_id=tx.id, sid=split.id) }}"
             hx-target="#{{ row_id }}"
             hx-swap="outerHTML">
       ✕

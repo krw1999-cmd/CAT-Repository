@@ -1,0 +1,25 @@
+<tr id="inv-pay-{{ p.id }}">
+  <td class="nowrap">{{ p.date or '—' }}</td>
+  <td>
+    {% if p.method == 'qb' %}
+      <span class="badge-pill badge-vendor">QB</span>
+    {% elif p.method == 'check' %}
+      <span class="badge-pill badge-insured">Check</span>
+    {% elif p.method == 'recoup' %}
+      <span class="badge-pill" style="background:#ede9fe;color:#5b21b6">Recoup</span>
+    {% else %}
+      <span class="text-muted">—</span>
+    {% endif %}
+  </td>
+  <td class="num">{{ (p.amount or 0) | money }}</td>
+  <td class="text-small">{{ p.reference if p.reference else '—' }}</td>
+  <td class="text-small text-muted">{% if p.linked_tx_id and p.linked_tx_seq %}#{{ p.linked_tx_seq }}{% else %}—{% endif %}</td>
+  <td class="actions-col">
+    <button class="btn-icon btn-icon-danger"
+            hx-delete="{{ url_for('payment_delete', claim_id=claim.id, tx_id=tx.id, pid=p.id) }}"
+            hx-target="#inv-pay-{{ p.id }}"
+            hx-swap="outerHTML"
+            hx-confirm="Delete this payment?"
+            title="Delete">✕</button>
+  </td>
+</tr>

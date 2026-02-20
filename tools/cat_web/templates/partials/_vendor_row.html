@@ -1,0 +1,18 @@
+<tr id="vendor-{{ v.id }}">
+  <td><strong>{{ v.name }}</strong></td>
+  <td class="text-small">{{ v.phone or '—' }}</td>
+  <td class="text-small">{{ v.email or '—' }}</td>
+  <td class="text-small text-muted">{{ v.notes or '' }}</td>
+  <td class="actions-col nowrap">
+    <button class="btn-icon"
+            hx-get="{{ url_for('vendor_edit_row', vendor_id=v.id) }}"
+            hx-target="#vendor-{{ v.id }}"
+            hx-swap="outerHTML"
+            title="Edit">✎</button>
+    <button class="btn-icon btn-icon-danger"
+            hx-delete="{{ url_for('vendor_delete', vendor_id=v.id) }}"
+            hx-target="#vendor-{{ v.id }}"
+            hx-swap="outerHTML"
+            hx-confirm="Delete vendor '{{ v.name }}'?">✕</button>
+  </td>
+</tr>

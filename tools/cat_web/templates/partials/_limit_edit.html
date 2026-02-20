@@ -4,24 +4,28 @@
 {% set save_method = "post" if is_new else "put" %}
 {% set form_id = "limit-form-" ~ row_id %}
 
+{% set dl_id = "limit-ct-dl-" ~ row_id %}
 <tr id="{{ row_id }}">
   <td>
-    <select name="coverage_type" class="input-sm" form="{{ form_id }}">
+    <input type="text" name="coverage_type" class="input-sm"
+           list="{{ dl_id }}"
+           value="{{ limit.coverage_type if limit else '' }}"
+           placeholder="Coverage type"
+           autocomplete="off"
+           form="{{ form_id }}"
+           style="min-width:120px">
+    <datalist id="{{ dl_id }}">
       {% for ct in coverage_types %}
-      <option value="{{ ct }}" {% if limit and limit.coverage_type == ct %}selected{% endif %}>
-        {{ ct }}
-      </option>
+      <option value="{{ ct }}"></option>
       {% endfor %}
-    </select>
+    </datalist>
   </td>
   <td><input name="base_limit" type="number" step="0.01" class="input-sm input-num"
              value="{{ limit.base_limit if limit else '' }}" form="{{ form_id }}"></td>
   <td><input name="extended_limit" type="number" step="0.01" class="input-sm input-num"
              value="{{ limit.extended_limit if limit else '' }}" form="{{ form_id }}"></td>
-  <td><input name="paid" type="number" step="0.01" class="input-sm input-num"
-             value="{{ limit.paid if limit else '' }}" form="{{ form_id }}"></td>
-  <td><input name="remaining" type="number" step="0.01" class="input-sm input-num"
-             value="{{ limit.remaining if limit else '' }}" form="{{ form_id }}"></td>
+  <td class="num text-muted" style="font-size:13px">{{ (limit.paid if limit else 0) | money }}<br><span style="font-size:11px">auto</span></td>
+  <td class="num text-muted" style="font-size:13px">{{ (limit.remaining if limit else 0) | money }}<br><span style="font-size:11px">auto</span></td>
   <td class="actions-col">
     <button class="btn btn-primary btn-sm" form="{{ form_id }}" type="submit">Save</button>
     {% if is_new %}

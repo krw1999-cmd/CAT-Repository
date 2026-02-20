@@ -1,0 +1,77 @@
+{% set did = d.id %}
+{% set is_active = not d.use_check_splits %}
+<tr id="disburse-{{ did }}-splits-panel">
+  <td colspan="11" style="padding:0; background:var(--bg-alt);">
+    <div style="padding:10px 16px 12px; border-left:3px solid var(--accent);">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+        <strong style="font-size:13px">Custom Splits — {{ d.recipient_name or 'Disbursement' }}</strong>
+        <button type="button" class="btn-icon"
+                onclick="this.closest('tr').outerHTML='<tr id=&quot;disburse-{{ did }}-splits-panel&quot;></tr>'"
+                title="Close">✕</button>
+      </div>
+
+      {% if not is_active %}
+        <p class="text-muted text-small" style="margin:0 0 8px">
+          This disbursement uses the transaction-level payroll splits.
+        </p>
+        <button class="btn btn-ghost btn-sm"
+                hx-post="{{ url_for('disburse_splits_activate', claim_id=claim.id, tx_id=tx.id, did=did) }}"
+                hx-target="#disburse-{{ did }}-splits-panel"
+                hx-swap="outerHTML">
+          Activate Custom Splits
+        </button>
+
+      {% else %}
+        <div class="table-wrap" style="margin-bottom:8px">
+          <table class="table table-compact">
+            <thead>
+              <tr>
+                <th>Role</th>
+                <th>Name</th>
+                <th class="num">Split %</th>
+                <th class="num">$ Amount</th>
+                <th class="actions-col"></th>
+              </tr>
+            </thead>
+            <tbody id="dsplit-tbody-{{ did }}">
+              {% for split in splits %}
+                {% include "partials/_disburse_split_row.html" %}
+              {% endfor %}
+              <tr id="dsplit-new-row-{{ did }}"></tr>
+            </tbody>
+            <tfoot>
+              {% set total_pct = splits | sum(attribute='split_pct') %}
+              {% set total_amt = (total_pct / 100 * (d.fee_owed or 0)) %}
+              {% set pct_css = 'color:var(--red)' if splits and (total_pct - 100)|abs > 0.01 else '' %}
+              <tr class="totals-row">
+                <td colspan="2" class="text-muted text-small">Total</td>
+                <td class="num">
+                  <span id="dsplit-total-pct-{{ did }}" style="{{ pct_css }}">{{ "%.2f"|format(total_pct) }}%</span>
+                </td>
+                <td class="num">
+                  <span id="dsplit-total-amt-{{ did }}">{{ total_amt | money }}</span>
+                </td>
+                <td></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap">
+          <button class="btn btn-ghost btn-sm"
+                  hx-get="{{ url_for('disburse_split_new_row', claim_id=claim.id, tx_id=tx.id, did=did) }}"
+                  hx-target="#dsplit-new-row-{{ did }}"
+                  hx-swap="outerHTML">
+            + Add Row
+          </button>
+          <button class="btn btn-ghost btn-sm"
+                  hx-post="{{ url_for('disburse_splits_reset', claim_id=claim.id, tx_id=tx.id, did=did) }}"
+                  hx-target="#disburse-{{ did }}-splits-panel"
+                  hx-swap="outerHTML"
+                  hx-confirm="Reset to transaction defaults? This will delete all custom splits for this disbursement.">
+            ↺ Reset to Defaults
+          </button>
+        </div>
+      {% endif %}
+    </div>
+  </td>
+</tr>

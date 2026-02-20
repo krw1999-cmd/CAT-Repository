@@ -41,9 +41,16 @@
         <tr id="disburse-new-row-placeholder"></tr>
       </tbody>
       <tfoot>
+        {% set _pct = ((disburse_totals.total_disbursed or 0) / (tx.amount or 1) * 100) %}
+        {% set _pct_cls = 'pct-exact' if (_pct >= 99.99 and _pct <= 100.01) else ('pct-over' if _pct > 100.01 else 'pct-under') %}
         <tr class="totals-row">
           <td colspan="2" class="text-muted text-small">Totals</td>
-          <td class="num"><strong><span id="disburse-total-disbursed">{{ disburse_totals.total_disbursed | money }}</span></strong></td>
+          <td class="num">
+            <strong><span id="disburse-total-disbursed">{{ disburse_totals.total_disbursed | money }}</span></strong>
+            {% if tx.amount %}
+            <br><span id="disburse-total-pct" class="disburse-pct {{ _pct_cls }}">{{ "%.1f"|format(_pct) }}%</span>
+            {% endif %}
+          </td>
           <td></td>
           <td></td>
           <td class="num"><span id="disburse-total-fee-owed">{{ disburse_totals.fee_owed | money }}</span></td>
@@ -52,6 +59,17 @@
           <td class="num"></td>
           <td colspan="2"></td>
         </tr>
+        {% if tx.amount %}
+        {% set _remaining = (tx.amount or 0) - (disburse_totals.total_disbursed or 0) %}
+        {% set _rem_style = 'color:var(--green)' if _remaining|abs < 0.01 else ('color:var(--red)' if _remaining < 0 else '') %}
+        <tr class="totals-row">
+          <td colspan="2" class="text-muted text-small">Remaining</td>
+          <td class="num">
+            <span id="disburse-remaining" style="{{ _rem_style }}">{{ _remaining | money }}</span>
+          </td>
+          <td colspan="8"></td>
+        </tr>
+        {% endif %}
       </tfoot>
     </table>
   </div>

@@ -1,0 +1,38 @@
+{% set row_id = "deferred-link-new-row-placeholder" %}
+{% set save_url = url_for('deferred_link_create', claim_id=claim.id, tx_id=tx.id) %}
+{% set form_id = "deferred-link-form-new" %}
+
+<tr id="{{ row_id }}">
+  <td colspan="5">
+    <select name="deferred_tx_id" class="input-sm select-sm" form="{{ form_id }}" style="min-width:260px">
+      <option value="">— select a transaction with deferred fee —</option>
+      {% for t in claim_txs_for_select %}
+      {% if (t.deferred or 0) > 0 %}
+      <option value="{{ t.id }}">
+        #{{ t.sequence_number }} {{ t.type }} {{ t.date or '' }} — deferred {{ (t.deferred or 0) | money }}
+      </option>
+      {% endif %}
+      {% endfor %}
+    </select>
+  </td>
+  <td class="actions-col">
+    <button class="btn btn-primary btn-sm" form="{{ form_id }}" type="submit">Link</button>
+    <button type="button" class="btn btn-ghost btn-sm"
+            onclick="document.getElementById('deferred-link-new-row-placeholder').outerHTML='<tr id=&quot;deferred-link-new-row-placeholder&quot;></tr>'">
+      ✕
+    </button>
+  </td>
+</tr>
+
+<script>
+(function() {
+  const f = document.createElement('form');
+  f.id = '{{ form_id }}';
+  f.setAttribute('hx-post', '{{ save_url }}');
+  f.setAttribute('hx-target', '#{{ row_id }}');
+  f.setAttribute('hx-swap', 'outerHTML');
+  f.style.display = 'none';
+  document.body.appendChild(f);
+  htmx.process(f);
+})();
+</script>

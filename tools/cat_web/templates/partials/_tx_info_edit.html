@@ -6,7 +6,8 @@
 
       <div class="field" style="min-width:140px">
         <label>Type</label>
-        <select name="type" class="select-sm" onchange="txInfoAutoFillPayer(this)">
+        <select name="type" class="select-sm" id="tx-info-type-sel"
+                onchange="txInfoAutoFillPayer(this)">
           {% for t in tx_types %}
           <option value="{{ t }}" {% if tx.type == t %}selected{% endif %}>{{ t }}</option>
           {% endfor %}
@@ -17,6 +18,43 @@
         <label>Date</label>
         <input type="date" name="date" class="input-sm" value="{{ tx.date or '' }}">
       </div>
+
+      {% set is_fee_invoice = (tx.type or '')|lower == 'fee invoice' %}
+      {% set _tx_type = (tx.type or '')|lower %}
+      {% set _claim_type_pm = {
+           'carrier': claim.proc_method_carrier,
+           'draw':    claim.proc_method_draw,
+           'escrow':  claim.proc_method_escrow,
+         }.get(_tx_type) %}
+      {% set _type_default = _claim_type_pm or {'carrier':'iink','draw':'iink','escrow':'sent_to_client','escrow endorsed':'iink'}.get(_tx_type) %}
+      {% if is_fee_invoice %}
+
+      <div class="field" style="min-width:140px">
+        <label>Invoice #</label>
+        <input type="text" name="invoice_number" class="input-sm" value="{{ tx.invoice_number or '' }}">
+      </div>
+
+      <div class="field" style="min-width:120px">
+        <label>Invoice For</label>
+        <select name="inv_for" class="input-sm select-sm" id="inv-for-sel"
+                onchange="toggleInvVendor(this.value)">
+          <option value="insured" {% if (tx.inv_for or 'insured') == 'insured' %}selected{% endif %}>Insured</option>
+          <option value="vendor"  {% if tx.inv_for == 'vendor' %}selected{% endif %}>Vendor</option>
+        </select>
+      </div>
+
+      <div class="field" id="inv-vendor-field"
+           style="min-width:160px; {% if tx.inv_for != 'vendor' %}display:none{% endif %}">
+        <label>Vendor</label>
+        <select name="inv_vendor_id" class="input-sm select-sm">
+          <option value="">— select —</option>
+          {% for v in vendors %}
+          <option value="{{ v.id }}" {% if tx.inv_vendor_id == v.id %}selected{% endif %}>{{ v.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      {% else %}
 
       <div class="field" style="min-width:110px">
         <label>Check #</label>
@@ -40,9 +78,39 @@
 
       <div class="field" style="min-width:70px; justify-content:flex-end">
         <label>Endorsed</label>
-        <input type="checkbox" name="endorsed" value="1" {% if tx.endorsed %}checked{% endif %}
+        <input type="checkbox" name="endorsed" value="1" id="tx-info-endorsed-cb"
+               {% if tx.endorsed %}checked{% endif %}
                style="width:auto; margin-top:6px">
       </div>
+
+      {% set _method_labels = {'iink':'iink','sent_to_client':'Sent to Client','wire':'Wire / ACH'} %}
+      <div class="field" style="min-width:150px">
+        <label>Processed Via</label>
+        <select name="proc_method" class="input-sm select-sm" id="proc-method-sel"
+                onchange="toggleFeeInvoiceField(this.value)">
+          <option value="">— {% if _claim_type_pm %}claim{% elif _type_default %}type{% endif %} default{% if _type_default %} ({{ _method_labels.get(_type_default, _type_default) }}){% endif %} —</option>
+          <option value="iink"           {% if tx.proc_method == 'iink' %}selected{% endif %}>iink</option>
+          <option value="sent_to_client" {% if tx.proc_method == 'sent_to_client' %}selected{% endif %}>Sent to Client</option>
+          <option value="wire"           {% if tx.proc_method == 'wire' %}selected{% endif %}>Wire / ACH</option>
+        </select>
+      </div>
+
+      {% set show_inv = (tx.proc_method == 'sent_to_client') or (not tx.proc_method and _type_default == 'sent_to_client') %}
+      <div class="field" id="fee-invoice-field" style="min-width:170px;{% if not show_inv %} display:none{% endif %}">
+        <label>Fee Invoice</label>
+        <select name="proc_fee_invoice_id" class="input-sm select-sm">
+          <option value="">— none linked —</option>
+          {% for inv in fee_invoices %}
+          <option value="{{ inv.id }}"
+                  {% if tx.proc_fee_invoice_id == inv.id %}selected{% endif %}>
+            {% if inv.invoice_number %}#{{ inv.invoice_number }}{% else %}Tx #{{ inv.sequence_number }}{% endif %}
+            ({{ inv.amount | money }})
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      {% endif %}
 
       <div class="field" style="min-width:50px; justify-content:flex-end">
         <label>VOID</label>
@@ -54,21 +122,6 @@
         <label>Notes</label>
         <input type="text" name="notes" class="input-sm" value="{{ tx.notes or '' }}">
       </div>
-
-      {% if open_escrows %}
-      <div class="field" style="min-width:200px">
-        <label>Linked Escrow (Draw only)</label>
-        <select name="linked_escrow_id" class="select-sm">
-          <option value="">— none —</option>
-          {% for e in open_escrows %}
-          <option value="{{ e.id }}"
-                  {% if tx.linked_escrow_id == e.id %}selected{% endif %}>
-            #{{ e.sequence_number or e.id }} ({{ e.date or '?' }}, {{ (e.amount or 0) | money }})
-          </option>
-          {% endfor %}
-        </select>
-      </div>
-      {% endif %}
 
     </div>
     <div class="header-actions" style="display:flex; gap:8px; align-self:flex-start; margin-top:20px">
@@ -85,13 +138,47 @@
 <script>
 (function() {
   const _carrierName = {{ claim.carrier | tojson }};
-  const _checkTypes = ['escrow', 'escrow endorsed', 'carrier', 'draw'];
-  window.txInfoAutoFillPayer = function(sel) {
+  const _checkTypes = ['escrow', 'escrow endorsed', 'carrier'];
+  window.txInfoAutoFillPayer = function(sel, isInit) {
     const payerInput = sel.closest('form').querySelector('[name="payer"]');
-    if (_carrierName && payerInput && !payerInput.value &&
-        _checkTypes.includes(sel.value.toLowerCase())) {
-      payerInput.value = _carrierName;
+    if (_carrierName && payerInput && _checkTypes.includes(sel.value.toLowerCase())) {
+      if (isInit ? !payerInput.value : true) {
+        payerInput.value = _carrierName;
+      }
     }
   };
+  // Fire on load if type is already set and payer is blank
+  const typeSel = document.getElementById('tx-info-type-sel');
+  if (typeSel) txInfoAutoFillPayer(typeSel, true);
+
+  // Endorsed ↔ Type sync
+  const endorsedCb = document.getElementById('tx-info-endorsed-cb');
+  if (typeSel && endorsedCb) {
+    typeSel.addEventListener('change', function() {
+      endorsedCb.checked = this.value === 'Escrow Endorsed';
+    });
+    endorsedCb.addEventListener('change', function() {
+      if (this.checked) {
+        typeSel.value = 'Escrow Endorsed';
+      } else if (typeSel.value === 'Escrow Endorsed') {
+        typeSel.value = 'Escrow';
+      }
+      txInfoAutoFillPayer(typeSel, false);
+    });
+  }
+
+  window.toggleInvVendor = function(val) {
+    const f = document.getElementById('inv-vendor-field');
+    if (f) f.style.display = val === 'vendor' ? '' : 'none';
+  };
+
+  const _effectiveDefault = {{ _type_default | tojson }};
+  window.toggleFeeInvoiceField = function(val) {
+    const eff = val || _effectiveDefault;
+    const f = document.getElementById('fee-invoice-field');
+    if (f) f.style.display = eff === 'sent_to_client' ? '' : 'none';
+  };
+  const procSel = document.getElementById('proc-method-sel');
+  if (procSel) toggleFeeInvoiceField(procSel.value);
 })();
 </script>

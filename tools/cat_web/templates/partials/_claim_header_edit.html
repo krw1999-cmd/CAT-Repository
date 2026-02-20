@@ -29,6 +29,33 @@
         <input id="job_number" name="job_number" type="text"
                value="{{ claim.job_number or '' }}" class="input-sm">
       </div>
+      <div class="header-field" style="min-width:130px">
+        <label class="label" for="proc_method_carrier">Carrier Default</label>
+        <select id="proc_method_carrier" name="proc_method_carrier" class="select-sm">
+          <option value="">— not set —</option>
+          <option value="iink"           {% if claim.proc_method_carrier == 'iink' %}selected{% endif %}>iink</option>
+          <option value="sent_to_client" {% if claim.proc_method_carrier == 'sent_to_client' %}selected{% endif %}>Sent to Client</option>
+          <option value="wire"           {% if claim.proc_method_carrier == 'wire' %}selected{% endif %}>Wire / ACH</option>
+        </select>
+      </div>
+      <div class="header-field" style="min-width:130px">
+        <label class="label" for="proc_method_draw">Draw Default</label>
+        <select id="proc_method_draw" name="proc_method_draw" class="select-sm">
+          <option value="">— not set —</option>
+          <option value="iink"           {% if claim.proc_method_draw == 'iink' %}selected{% endif %}>iink</option>
+          <option value="sent_to_client" {% if claim.proc_method_draw == 'sent_to_client' %}selected{% endif %}>Sent to Client</option>
+          <option value="wire"           {% if claim.proc_method_draw == 'wire' %}selected{% endif %}>Wire / ACH</option>
+        </select>
+      </div>
+      <div class="header-field" style="min-width:130px">
+        <label class="label" for="proc_method_escrow">Escrow Default</label>
+        <select id="proc_method_escrow" name="proc_method_escrow" class="select-sm">
+          <option value="">— not set —</option>
+          <option value="iink"           {% if claim.proc_method_escrow == 'iink' %}selected{% endif %}>iink</option>
+          <option value="sent_to_client" {% if claim.proc_method_escrow == 'sent_to_client' %}selected{% endif %}>Sent to Client</option>
+          <option value="wire"           {% if claim.proc_method_escrow == 'wire' %}selected{% endif %}>Wire / ACH</option>
+        </select>
+      </div>
     </div>
     <div class="header-actions">
       <button type="submit" class="btn btn-primary btn-sm">Save</button>

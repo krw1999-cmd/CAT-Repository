@@ -6,7 +6,7 @@
   <h2>Vendors</h2>
 </div>
 
-<section class="section" id="vendors-section">
+<section class="section">
   <div class="table-wrap">
     <table class="table table-compact">
       <thead>
@@ -20,51 +20,21 @@
       </thead>
       <tbody id="vendors-tbody">
         {% for v in vendors %}
-        <tr id="vendor-{{ v.id }}">
-          <td><strong>{{ v.name }}</strong></td>
-          <td class="text-small">{{ v.phone or '—' }}</td>
-          <td class="text-small">{{ v.email or '—' }}</td>
-          <td class="text-small text-muted">{{ v.notes or '' }}</td>
-          <td class="actions-col nowrap">
-            <button class="btn-icon btn-icon-danger"
-                    hx-delete="{{ url_for('vendor_delete', vendor_id=v.id) }}"
-                    hx-target="#vendors-section"
-                    hx-swap="outerHTML"
-                    hx-confirm="Delete vendor '{{ v.name }}'?">✕</button>
-          </td>
-        </tr>
+          {% include "partials/_vendor_row.html" %}
         {% else %}
-        <tr><td colspan="5" class="text-center text-muted" style="padding:20px">No vendors yet.</td></tr>
+        <tr id="vendors-empty"><td colspan="5" class="text-center text-muted" style="padding:20px">No vendors yet.</td></tr>
         {% endfor %}
+        <tr id="vendor-new-row-placeholder"></tr>
       </tbody>
     </table>
   </div>
-</section>
-
-<section class="section">
-  <div class="section-header"><h3>Add Vendor</h3></div>
-  <form hx-post="{{ url_for('vendor_create') }}"
-        hx-target="#vendors-section"
-        hx-swap="outerHTML">
-    <div class="form-grid-2" style="max-width:500px">
-      <div class="field">
-        <label>Name *</label>
-        <input type="text" name="name" class="input-sm" required placeholder="Company name">
-      </div>
-      <div class="field">
-        <label>Phone</label>
-        <input type="text" name="phone" class="input-sm" placeholder="(555) 000-0000">
-      </div>
-      <div class="field">
-        <label>Email</label>
-        <input type="email" name="email" class="input-sm" placeholder="email@example.com">
-      </div>
-      <div class="field">
-        <label>Notes</label>
-        <input type="text" name="notes" class="input-sm">
-      </div>
-    </div>
-    <button type="submit" class="btn btn-primary btn-sm">Add Vendor</button>
-  </form>
+  <div style="margin-top:8px">
+    <button class="btn btn-ghost btn-sm"
+            hx-get="{{ url_for('vendor_new_row') }}"
+            hx-target="#vendor-new-row-placeholder"
+            hx-swap="outerHTML">
+      + Add Vendor
+    </button>
+  </div>
 </section>
 {% endblock %}

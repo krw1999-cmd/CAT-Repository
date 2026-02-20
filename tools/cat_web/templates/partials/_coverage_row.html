@@ -1,6 +1,8 @@
+{% set row_pct = ((cov.amount or 0) / (tx.amount or 0) * 100) if (tx.amount or 0) > 0 else 0 %}
 <tr id="coverage-{{ cov.id }}">
   <td>{{ cov.coverage_type }}</td>
   <td class="num">{{ (cov.amount or 0) | money }}</td>
+  <td class="num text-small text-muted">{{ "%.1f"|format(row_pct) }}%</td>
   <td class="actions-col">
     <button class="btn-icon"
             hx-get="{{ url_for('coverage_edit_row', claim_id=claim.id, tx_id=tx.id, cid=cov.id) }}"

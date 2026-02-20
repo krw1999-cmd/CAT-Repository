@@ -1,18 +1,18 @@
-<tr id="limit-{{ lim.id }}">
-  <td>{{ lim.coverage_type }}</td>
-  <td class="num">{{ (lim.base_limit or 0) | money }}</td>
-  <td class="num">{{ (lim.extended_limit or 0) | money }}</td>
-  <td class="num">{{ (lim.paid or 0) | money }}</td>
-  <td class="num">{{ (lim.remaining or 0) | money }}</td>
+<tr id="limit-{{ limit.id }}">
+  <td>{{ limit.coverage_type }}</td>
+  <td class="num">{{ (limit.base_limit or 0) | money }}</td>
+  <td class="num">{{ (limit.extended_limit or 0) | money }}</td>
+  <td class="num">{{ (limit.paid or 0) | money }}</td>
+  <td class="num">{{ (limit.remaining or 0) | money }}</td>
   <td class="actions-col">
     <button class="btn-icon"
-            hx-get="{{ url_for('limit_edit_row', claim_id=claim.id, limit_id=lim.id) }}"
-            hx-target="#limit-{{ lim.id }}"
+            hx-get="{{ url_for('limit_edit_row', claim_id=claim.id, limit_id=limit.id) }}"
+            hx-target="#limit-{{ limit.id }}"
             hx-swap="outerHTML"
             title="Edit">✎</button>
     <button class="btn-icon btn-icon-danger"
-            hx-delete="{{ url_for('limit_update', claim_id=claim.id, limit_id=lim.id) }}"
-            hx-target="#limit-{{ lim.id }}"
+            hx-delete="{{ url_for('limit_delete', claim_id=claim.id, limit_id=limit.id) }}"
+            hx-target="#limit-{{ limit.id }}"
             hx-swap="outerHTML"
             hx-confirm="Delete this limit row?"
             title="Delete">✕</button>

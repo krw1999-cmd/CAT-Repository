@@ -6,7 +6,7 @@
 {% set form_id = "disburse-form-" ~ row_id %}
 {% set eff_type = recipient_type if is_new else (d.recipient_type or recipient_type) %}
 
-<tr id="{{ row_id }}">
+<tr id="{{ row_id }}" data-insured-name="{{ claim.insured_name or '' }}">
   <td>
     <select name="recipient_type" class="input-sm select-sm" form="{{ form_id }}"
             onchange="toggleVendorField(this, '{{ form_id }}')">
@@ -103,8 +103,6 @@
   if (typeSelect) toggleVendorField(typeSelect, '{{ form_id }}', true);
 })();
 
-const _insuredName_{{ form_id | replace('-','_') }} = {{ claim.insured_name | tojson }};
-
 function toggleVendorField(sel, fid, isInit) {
   const vendorSel = document.getElementById('vendor-sel-' + fid);
   const rname = document.getElementById('rname-' + fid);
@@ -112,8 +110,9 @@ function toggleVendorField(sel, fid, isInit) {
     if (vendorSel) vendorSel.style.display = '';
   } else {
     if (vendorSel) vendorSel.style.display = 'none';
-    // Auto-fill insured name when switching to insured type (or on init if blank)
-    const insuredName = window['_insuredName_' + fid.replace(/-/g,'_')];
+    // Auto-fill insured name from data attribute on the row
+    const row = sel.closest('tr');
+    const insuredName = row ? row.dataset.insuredName : '';
     if (rname && insuredName && (isInit ? !rname.value : true)) {
       rname.value = insuredName;
     }
@@ -128,7 +127,6 @@ function syncVendorName(sel, fid) {
 function calcDisburseFeePct(input, fid) {
   const form = document.getElementById(fid);
   if (!form) return;
-  const amtEl = form.querySelector ? null : null;
   const amtInput = document.querySelector('[form="' + fid + '"][name="amount"]');
   const pctInput = document.getElementById('fpct-' + fid);
   const owedInput = document.getElementById('fowed-' + fid);
@@ -136,5 +134,13 @@ function calcDisburseFeePct(input, fid) {
   const amt = parseFloat(amtInput.value) || 0;
   const pctVal = pctInput && pctInput.value !== '' ? parseFloat(pctInput.value) : {{ claim.contract_pct or 0 }};
   owedInput.value = (amt * pctVal / 100).toFixed(2);
+  // Auto-check Fee? when a non-zero fee % is entered
+  if (pctInput && parseFloat(pctInput.value) > 0) {
+    const cb = document.querySelector('[form="' + fid + '"][name="fee_applies"]');
+    if (cb && !cb.checked) {
+      cb.checked = true;
+      toggleFeeFields(cb, fid);
+    }
+  }
 }
 </script>

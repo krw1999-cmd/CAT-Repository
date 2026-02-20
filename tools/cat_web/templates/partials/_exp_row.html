@@ -1,12 +1,77 @@
-<tr id="exp-{{ exp.id }}">
+{# Auto-derive type from amounts #}
+{% set c_amt = exp.client_amount or 0 %}
+{% set w_amt = exp.wp_amount     or 0 %}
+{% if c_amt > 0 and w_amt > 0 %}
+  {% set exp_type = 'split' %}
+{% elif c_amt > 0 %}
+  {% set exp_type = 'client' %}
+{% elif w_amt > 0 %}
+  {% set exp_type = 'wp' %}
+{% else %}
+  {% set exp_type = '' %}
+{% endif %}
+
+{# Payment state #}
+{% set ep  = exp.outstanding_to_payee   or 0 %}
+{% set ca  = exp.client_outstanding_amt or 0 %}
+{% set wa  = exp.wp_outstanding_amt     or 0 %}
+{% set ro  = exp.reimburse_owed         or 0 %}
+{% set wf  = exp.wp_fronted_amt         or 0 %}
+{% set any_paid = (exp.total_paid or 0) > 0.005 %}
+
+<tr id="exp-{{ exp.id }}" class="row-link"
+    onclick="location.href='{{ url_for('expense_detail', claim_id=exp.claim_id, exp_id=exp.id) }}'">
   <td class="nowrap">{{ exp.invoice_date or '—' }}</td>
   <td>{{ exp.payee_name or '—' }}</td>
   <td class="num">{{ (exp.invoice_amount or 0) | money }}</td>
-  <td>{{ exp.responsible_party or '—' }}</td>
-  <td class="num">{{ (exp.unpaid_to_payee or 0) | money }}</td>
-  <td class="num">{{ (exp.client_outstanding or 0) | money }}</td>
-  <td class="num">{{ (exp.wp_outstanding or 0) | money }}</td>
-  <td class="actions-col">
+
+  {# Type badge #}
+  <td>
+    {% if exp_type == 'client' %}
+      <span class="badge-pill badge-insured">Client</span>
+    {% elif exp_type == 'wp' %}
+      <span class="badge-pill badge-vendor">WP</span>
+    {% elif exp_type == 'split' %}
+      <span class="badge-pill" style="background:#f3f4f6;color:#374151">Split</span>
+    {% else %}
+      <span class="text-muted">—</span>
+    {% endif %}
+  </td>
+
+  {# Status badge #}
+  <td>
+    {% if ep <= 0.005 and ro <= 0.005 and (exp.invoice_amount or 0) > 0 %}
+      <span class="badge-pill" style="background:#d1fae5;color:#065f46">Paid</span>
+    {% elif ep <= 0.005 and ro > 0.005 %}
+      <span class="badge-pill" style="background:#fef3c7;color:#92400e">WP Fronted · Client Owes WP</span>
+    {% elif wf > 0.005 and ca > 0.005 %}
+      <span class="badge-pill" style="background:#fef3c7;color:#92400e">WP Fronted · Client Outstanding</span>
+    {% elif ca > 0.005 and wa <= 0.005 %}
+      {% if any_paid %}
+        <span class="badge-pill" style="background:#fef3c7;color:#92400e">WP Paid · Client Outstanding</span>
+      {% else %}
+        <span class="badge-pill" style="background:#fee2e2;color:#991b1b">Client Outstanding</span>
+      {% endif %}
+    {% elif wa > 0.005 and ca <= 0.005 %}
+      {% if any_paid %}
+        <span class="badge-pill" style="background:#fef3c7;color:#92400e">Client Paid · WP Outstanding</span>
+      {% else %}
+        <span class="badge-pill" style="background:#fee2e2;color:#991b1b">WP Outstanding</span>
+      {% endif %}
+    {% elif ca > 0.005 and wa > 0.005 %}
+      <span class="badge-pill" style="background:#fee2e2;color:#991b1b">Unpaid</span>
+    {% elif ep > 0.005 %}
+      <span class="badge-pill" style="background:#f3f4f6;color:#6b7280">Unpaid</span>
+    {% else %}
+      <span class="text-muted">—</span>
+    {% endif %}
+  </td>
+
+  <td class="num {% if ep > 0.005 %}text-red{% endif %}">{{ ep | money }}</td>
+  <td class="num {% if ca > 0.005 %}text-red{% endif %}">{{ ca | money }}</td>
+  <td class="num {% if wa > 0.005 %}text-red{% endif %}">{{ wa | money }}</td>
+
+  <td class="actions-col nowrap" onclick="event.stopPropagation()">
     <button class="btn-icon"
             hx-get="{{ url_for('exp_edit_row', claim_id=exp.claim_id, exp_id=exp.id) }}"
             hx-target="#exp-{{ exp.id }}"

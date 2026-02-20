@@ -1,0 +1,70 @@
+{% set fee_recouped = disburse_totals.fee_recouped or 0 %}
+{% set total_pct = recouped_splits | sum(attribute='split_pct') %}
+{% set total_amt = (fee_recouped * total_pct / 100) %}
+
+<section class="section">
+  <div class="section-header">
+    <h3>
+      Recouped Fee Distribution
+      <span class="badge-pill" style="background:var(--accent); color:#fff; font-size:11px; margin-left:4px; vertical-align:middle">Override</span>
+    </h3>
+    <span class="text-muted text-small">
+      Total: <strong id="recouped-split-total-pct">{{ "%.2f"|format(total_pct) }}%</strong>
+      &nbsp;·&nbsp;
+      Fee: <strong id="recouped-split-total-fee">{{ total_amt | money }}</strong>
+      of {{ fee_recouped | money }} recouped
+    </span>
+  </div>
+  <p class="text-muted text-small" style="margin:0 0 8px">
+    These percentages apply only to the recouped portion
+    ({{ fee_recouped | money }}). The main splits table shows
+    <strong>—</strong> for recouped while this override is active.
+  </p>
+  <div class="table-wrap">
+    <table class="table table-compact">
+      <thead>
+        <tr>
+          <th>Role</th>
+          <th>Name</th>
+          <th class="num">Split %</th>
+          <th class="num">$ Amount</th>
+          <th class="actions-col"></th>
+        </tr>
+      </thead>
+      <tbody id="recouped-split-tbody">
+        {% for split in recouped_splits %}
+          {% include "partials/_recouped_split_row.html" %}
+        {% endfor %}
+        <tr id="recouped-split-new-row-placeholder"></tr>
+      </tbody>
+      <tfoot>
+        {% set pct_css = 'color:var(--red)' if recouped_splits and (total_pct - 100)|abs > 0.01 else '' %}
+        <tr class="totals-row">
+          <td colspan="2" class="text-muted text-small">Total</td>
+          <td class="num">
+            <span id="recouped-split-total-pct" style="{{ pct_css }}">{{ "%.2f"|format(total_pct) }}%</span>
+          </td>
+          <td class="num">
+            <span id="recouped-split-total-fee">{{ total_amt | money }}</span>
+          </td>
+          <td></td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+  <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap">
+    <button class="btn btn-ghost btn-sm"
+            hx-get="{{ url_for('recouped_split_new_row', claim_id=claim.id, tx_id=tx.id) }}"
+            hx-target="#recouped-split-new-row-placeholder"
+            hx-swap="outerHTML">
+      + Add Row
+    </button>
+    <button class="btn btn-ghost btn-sm"
+            hx-post="{{ url_for('recouped_splits_reset', claim_id=claim.id, tx_id=tx.id) }}"
+            hx-target="#splits-section"
+            hx-swap="innerHTML"
+            hx-confirm="Reset recouped splits? The main split percentages will apply to the recouped amount again.">
+      ↺ Reset to Default
+    </button>
+  </div>
+</section>

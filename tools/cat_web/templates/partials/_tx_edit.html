@@ -5,35 +5,32 @@
 {% set form_id = "tx-form-" ~ row_id %}
 
 <tr id="{{ row_id }}">
-  <td><input name="sequence_number" type="text" class="input-sm input-seq"
-             value="{{ tx.sequence_number if tx else '' }}" form="{{ form_id }}"></td>
+  {# Col 1: Check # #}
+  <td><input name="check_number" type="text" class="input-sm input-seq"
+             value="{{ tx.check_number if tx else '' }}" form="{{ form_id }}"></td>
+  {# Col 2: Date #}
   <td><input name="date" type="date" class="input-sm"
              value="{{ tx.date if tx else '' }}" form="{{ form_id }}"></td>
+  {# Col 3: Type #}
   <td>
-    <select name="type" class="input-sm select-sm" form="{{ form_id }}"
-            onchange="toggleEscrowLink(this, '{{ form_id }}')">
+    <select name="type" class="input-sm select-sm" form="{{ form_id }}">
       <option value=""></option>
       {% for t in tx_types %}
       <option value="{{ t }}" {% if tx and tx.type == t %}selected{% endif %}>{{ t }}</option>
       {% endfor %}
     </select>
   </td>
+  {# Col 4: Amount #}
   <td><input name="amount" type="number" step="0.01" class="input-sm input-num"
              value="{{ tx.amount if tx else '' }}" form="{{ form_id }}"></td>
-  <td id="escrow-link-cell-{{ form_id }}"
-      style="{{ '' if (tx and tx.type and tx.type|lower == 'draw') else 'display:none' }}">
-    <select name="linked_escrow_id" class="input-sm select-sm" form="{{ form_id }}">
-      <option value="">— no escrow —</option>
-      {% for e in open_escrows %}
-      <option value="{{ e.id }}"
-              {% if tx and tx.linked_escrow_id == e.id %}selected{% endif %}>
-        #{{ e.sequence_number or e.id }} ({{ e.date or '?' }}, {{ (e.amount or 0) | money }})
-      </option>
-      {% endfor %}
-    </select>
-  </td>
+  {# Col 5: Status — auto-derived from Type, not editable #}
+  <td></td>
+  {# Cols 6-11: Computed fields #}
+  <td colspan="6"></td>
+  {# Col 12: Notes #}
   <td><input name="notes" type="text" class="input-sm input-notes"
              value="{{ tx.notes if tx else '' }}" form="{{ form_id }}"></td>
+  {# Col 13: Actions #}
   <td class="actions-col nowrap">
     <button class="btn btn-primary btn-sm" form="{{ form_id }}" type="submit">Save</button>
     {% if is_new %}
@@ -64,8 +61,4 @@
   htmx.process(f);
 })();
 
-function toggleEscrowLink(sel, formId) {
-  const cell = document.getElementById('escrow-link-cell-' + formId);
-  if (cell) cell.style.display = sel.value.toLowerCase() === 'draw' ? '' : 'none';
-}
 </script>

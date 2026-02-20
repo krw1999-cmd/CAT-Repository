@@ -4,18 +4,27 @@
 {% set save_method = "post" if is_new else "put" %}
 {% set form_id = "coverage-form-" ~ row_id %}
 
+{% set dl_id = "cov-ct-dl-" ~ row_id %}
 <tr id="{{ row_id }}">
   <td>
-    <select name="coverage_type" class="input-sm select-sm" form="{{ form_id }}">
+    <input type="text" name="coverage_type" class="input-sm"
+           list="{{ dl_id }}"
+           value="{{ cov.coverage_type if cov else '' }}"
+           placeholder="Coverage type"
+           autocomplete="off"
+           form="{{ form_id }}"
+           style="min-width:120px">
+    <datalist id="{{ dl_id }}">
       {% for ct in coverage_types %}
-      <option value="{{ ct }}" {% if cov and cov.coverage_type == ct %}selected{% endif %}>{{ ct }}</option>
+      <option value="{{ ct }}"></option>
       {% endfor %}
-    </select>
+    </datalist>
   </td>
   <td>
     <input type="number" name="amount" step="0.01" class="input-sm input-num"
            value="{{ cov.amount if cov else '' }}" form="{{ form_id }}">
   </td>
+  <td class="num text-muted text-small">—</td>
   <td class="actions-col">
     <button class="btn btn-primary btn-sm" form="{{ form_id }}" type="submit">Save</button>
     {% if is_new %}

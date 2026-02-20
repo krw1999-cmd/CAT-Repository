@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+{% block title %}{{ expense.payee_name or 'Expense' }} — {{ claim.insured_name }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <a href="{{ url_for('claim_detail', claim_id=claim.id) }}" class="breadcrumb">
+      ← {{ claim.insured_name or 'Claim' }}
+    </a>
+    <h2>Expense: {{ expense.payee_name or '—' }}</h2>
+  </div>
+</div>
+
+{# ── Expense Info Card ──────────────────────────────────────────────────────── #}
+<div id="exp-info">
+  {% include "partials/_exp_info.html" %}
+</div>
+
+<div class="detail-grid">
+
+  {# ── Left column ──────────────────────────────────────────────────────────── #}
+  <div class="detail-main">
+
+    {# ── Payments to Payee ─────────────────────────────────────────────────── #}
+    <section class="section">
+      <div class="section-header">
+        <h3>Payments to Payee</h3>
+        <span class="text-muted text-small">
+          WP: <strong id="exp-pay-wp-total">{{ totals.wp_paid | money }}</strong>
+          &nbsp;·&nbsp;
+          Client: <strong id="exp-pay-client-total">{{ totals.client_paid | money }}</strong>
+        </span>
+      </div>
+      <div class="table-wrap">
+        <table class="table table-compact">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Paid By</th>
+              <th class="num">Amount</th>
+              <th>Method</th>
+              <th>Reference</th>
+              <th>Notes</th>
+              <th class="actions-col"></th>
+            </tr>
+          </thead>
+          <tbody id="exp-pay-tbody">
+            {% for p in payments %}
+              {% include "partials/_exp_pay_row.html" %}
+            {% endfor %}
+            <tr id="exp-pay-new-row-placeholder"></tr>
+          </tbody>
+        </table>
+      </div>
+      <button class="btn btn-ghost btn-sm"
+              hx-get="{{ url_for('exp_pay_new_row', claim_id=claim.id, exp_id=expense.id) }}"
+              hx-target="#exp-pay-new-row-placeholder"
+              hx-swap="outerHTML">
+        + Add Payment
+      </button>
+    </section>
+
+    {# ── Reimbursements ────────────────────────────────────────────────────── #}
+    {% if totals.wp_paid > 0 and expense.client_amount > 0 %}
+    <section class="section">
+      <div class="section-header">
+        <h3>Client → WP Reimbursements</h3>
+        <span class="text-muted text-small">
+          Reimbursed: <strong id="exp-reimb-total">{{ totals.reimbursed | money }}</strong>
+          &nbsp;·&nbsp;
+          Owed: <strong id="exp-reimb-owed" class="{{ 'text-red' if totals.reimburse_owed > 0.005 else '' }}">
+            {{ totals.reimburse_owed | money }}
+          </strong>
+        </span>
+      </div>
+      <div class="table-wrap">
+        <table class="table table-compact">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th class="num">Amount</th>
+              <th>Method</th>
+              <th>Reference</th>
+              <th>Linked Tx</th>
+              <th>Notes</th>
+              <th class="actions-col"></th>
+            </tr>
+          </thead>
+          <tbody id="exp-reimb-tbody">
+            {% for r in reimbursements %}
+              {% include "partials/_exp_reimb_row.html" %}
+            {% endfor %}
+            <tr id="exp-reimb-new-row-placeholder"></tr>
+          </tbody>
+        </table>
+      </div>
+      <button class="btn btn-ghost btn-sm"
+              hx-get="{{ url_for('exp_reimb_new_row', claim_id=claim.id, exp_id=expense.id) }}"
+              hx-target="#exp-reimb-new-row-placeholder"
+              hx-swap="outerHTML">
+        + Add Reimbursement
+      </button>
+    </section>
+    {% endif %}
+
+    {# ── WP Splits ─────────────────────────────────────────────────────────── #}
+    {% if expense.wp_amount > 0 %}
+    <div id="exp-splits-section">
+      {% include "partials/_exp_splits_section.html" %}
+    </div>
+    {% endif %}
+
+  </div>
+
+  {# ── Right sidebar ─────────────────────────────────────────────────────────── #}
+  <div class="detail-sidebar">
+    <div class="card" id="exp-totals-sidebar">
+
+      <div class="sidebar-label">Invoice Amount</div>
+      <div class="sidebar-value">{{ (expense.invoice_amount or 0) | money }}</div>
+
+      <div class="sidebar-divider"></div>
+
+      <div class="sidebar-label">Client Owes</div>
+      <div class="sidebar-value">
+        <span id="exp-sidebar-client-amount">{{ (expense.client_amount or 0) | money }}</span>
+      </div>
+
+      <div class="sidebar-label">WP Owes</div>
+      <div class="sidebar-value">
+        <span id="exp-sidebar-wp-amount">{{ (expense.wp_amount or 0) | money }}</span>
+      </div>
+
+      <div class="sidebar-divider"></div>
+
+      <div class="sidebar-label">WP Paid</div>
+      <div class="sidebar-value {% if totals.wp_paid > 0 %}text-green{% endif %}">
+        <span id="exp-sidebar-wp-paid">{{ totals.wp_paid | money }}</span>
+      </div>
+
+      <div class="sidebar-label">Client Paid</div>
+      <div class="sidebar-value {% if totals.client_paid > 0 %}text-green{% endif %}">
+        <span id="exp-sidebar-client-paid">{{ totals.client_paid | money }}</span>
+      </div>
+
+      {% if totals.wp_unpaid > 0.005 %}
+      <div class="sidebar-label">WP Outstanding</div>
+      <div class="sidebar-value highlight">
+        <span id="exp-sidebar-wp-unpaid">{{ totals.wp_unpaid | money }}</span>
+      </div>
+      {% else %}
+      <span id="exp-sidebar-wp-unpaid" style="display:none">$0.00</span>
+      {% endif %}
+
+      {% if totals.client_unpaid > 0.005 %}
+      <div class="sidebar-label">Client Outstanding</div>
+      <div class="sidebar-value highlight">
+        <span id="exp-sidebar-client-unpaid">{{ totals.client_unpaid | money }}</span>
+      </div>
+      {% else %}
+      <span id="exp-sidebar-client-unpaid" style="display:none">$0.00</span>
+      {% endif %}
+
+      {% if totals.wp_fronted_for_client > 0 %}
+      <div class="sidebar-divider"></div>
+
+      <div class="sidebar-label">WP Fronted for Client</div>
+      <div class="sidebar-value">
+        <span id="exp-sidebar-wp-fronted">{{ totals.wp_fronted_for_client | money }}</span>
+      </div>
+
+      <div class="sidebar-label">Reimbursed</div>
+      <div class="sidebar-value {% if totals.reimbursed > 0 %}text-green{% endif %}">
+        <span id="exp-sidebar-reimbursed">{{ totals.reimbursed | money }}</span>
+      </div>
+
+      <div class="sidebar-label">Balance Owed</div>
+      <div class="sidebar-value {% if totals.reimburse_owed > 0.005 %}text-red{% endif %}">
+        <span id="exp-sidebar-reimb-owed">{{ totals.reimburse_owed | money }}</span>
+      </div>
+      {% else %}
+      <span id="exp-sidebar-wp-fronted" style="display:none">$0.00</span>
+      <span id="exp-sidebar-reimbursed" style="display:none">$0.00</span>
+      <span id="exp-sidebar-reimb-owed" style="display:none">$0.00</span>
+      {% endif %}
+
+    </div>
+  </div>
+
+</div>
+{% endblock %}

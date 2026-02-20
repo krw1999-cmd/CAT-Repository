@@ -288,6 +288,38 @@ a:hover { text-decoration: underline; }
 }
 .btn-icon:hover { background: #f1f5f9; color: var(--blue); }
 .btn-icon-danger:hover { background: #fef2f2; color: var(--red); }
+.btn-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-family: var(--font);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all .12s;
+}
+.btn-toggle:hover { border-color: #94a3b8; color: var(--text); }
+.btn-toggle-on {
+  background: #f0fdf4;
+  border-color: var(--green);
+  color: var(--green);
+  font-weight: 600;
+}
+
+/* ── Disbursement percentage indicator ────────────────────────────────────── */
+.disburse-pct {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .01em;
+}
+.pct-exact { color: var(--green); }
+.pct-over  { color: var(--red); }
+.pct-under { color: #d97706; }  /* amber */
 
 /* ── Form elements ────────────────────────────────────────────────────────── */
 .field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 14px; }
@@ -330,6 +362,7 @@ input:focus, select:focus, textarea:focus {
   padding: 4px 6px;
   font-size: 12px;
   border-radius: 4px;
+  width: auto;
   max-width: 220px;
 }
 
@@ -468,8 +501,28 @@ input:focus, select:focus, textarea:focus {
   letter-spacing: .3px;
   white-space: nowrap;
 }
-.status-planned  { background: #fef3c7; color: #92400e; }
+.status-planned  { background: #dbeafe; color: #1e40af; }
 .status-released { background: #d1fae5; color: #065f46; }
+.status-void     { background: #fee2e2; color: #991b1b; font-weight: 700; letter-spacing: .5px; }
+
+/* ── Void row ─────────────────────────────────────────────────────────────── */
+.tx-row-void { opacity: .6; }
+.tx-row-void td { text-decoration: line-through; color: var(--muted); }
+.tx-row-void .void-stamp,
+.tx-row-void .status-badge { text-decoration: none; }
+.void-stamp {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 5px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  color: #991b1b;
+  border: 1.5px solid #991b1b;
+  border-radius: 3px;
+  vertical-align: middle;
+  text-decoration: none;
+}
 
 /* ── Summary card variants ────────────────────────────────────────────────── */
 .summary-released {
@@ -487,6 +540,8 @@ input:focus, select:focus, textarea:focus {
   color: var(--muted);
   margin-top: 2px;
 }
+.summary-warning { border-color: #dc2626; background: #fef2f2; }
+.summary-warning .summary-value { color: #dc2626; }
 
 /* ── Disbursement table ────────────────────────────────────────────────────── */
 .badge-pill {
@@ -560,4 +615,25 @@ input:focus, select:focus, textarea:focus {
   font-size: 11px;
   color: var(--red);
   margin-left: 4px;
+}
+.escrow-row-partial td { background: #fffbeb; }
+.escrow-row-missing td { background: #fef2f2; }
+.text-red { color: var(--red); }
+
+/* ── Fee Invoice status badge ─────────────────────────────────────────────── */
+.status-inv-pending  { background: #fef3c7; color: #92400e; }
+.status-inv-partial  { background: #fed7aa; color: #9a3412; }
+.status-inv-unpaid   { background: #fee2e2; color: #991b1b; }
+
+/* ── Claims list — amber tint + unpaid invoice pill ──────────────────────── */
+.claim-row-unpaid-inv { background: #fffbeb !important; }
+.badge-unpaid-inv {
+  display: inline-block;
+  font-size: 11px;
+  background: #fde68a;
+  color: #92400e;
+  border-radius: 10px;
+  padding: 1px 7px;
+  font-weight: 600;
+  margin-left: 6px;
 }

@@ -20,6 +20,25 @@
       <span class="label">Job #</span>
       <span class="value">{{ claim.job_number or '—' }}</span>
     </div>
+    {% set _pm = {'iink':'iink','sent_to_client':'Sent to Client','wire':'Wire / ACH'} %}
+    {% if claim.proc_method_carrier %}
+    <div class="header-field">
+      <span class="label">Carrier Default</span>
+      <span class="value">{{ _pm.get(claim.proc_method_carrier, claim.proc_method_carrier) }}</span>
+    </div>
+    {% endif %}
+    {% if claim.proc_method_draw %}
+    <div class="header-field">
+      <span class="label">Draw Default</span>
+      <span class="value">{{ _pm.get(claim.proc_method_draw, claim.proc_method_draw) }}</span>
+    </div>
+    {% endif %}
+    {% if claim.proc_method_escrow %}
+    <div class="header-field">
+      <span class="label">Escrow Default</span>
+      <span class="value">{{ _pm.get(claim.proc_method_escrow, claim.proc_method_escrow) }}</span>
+    </div>
+    {% endif %}
   </div>
   <div class="header-actions">
     <button class="btn btn-ghost btn-sm"

@@ -1,0 +1,66 @@
+{% set row_id = "inv-pay-new-row-placeholder" %}
+{% set save_url = url_for('payment_create', claim_id=claim.id, tx_id=tx.id) %}
+{% set form_id = "inv-pay-form-new" %}
+
+<tr id="{{ row_id }}">
+  <td>
+    <input type="date" name="date" class="input-sm" form="{{ form_id }}"
+           value="{{ p.date if p else '' }}">
+  </td>
+  <td>
+    <select name="method" class="input-sm select-sm" form="{{ form_id }}"
+            id="inv-pay-method-sel" onchange="invPayMethodChange(this)">
+      <option value="qb"    {% if p and p.method == 'qb'    %}selected{% endif %}>QB</option>
+      <option value="check" {% if p and p.method == 'check' %}selected{% endif %}>Check</option>
+      <option value="recoup"{% if p and p.method == 'recoup'%}selected{% endif %}>Recoup</option>
+    </select>
+  </td>
+  <td>
+    <input type="number" name="amount" step="0.01" class="input-sm input-num" form="{{ form_id }}"
+           value="{{ p.amount if p else '' }}" style="width:100px">
+  </td>
+  <td>
+    <input type="text" name="reference" class="input-sm" form="{{ form_id }}"
+           value="{{ p.reference if p else '' }}" placeholder="Ref #" style="width:100px">
+  </td>
+  <td id="inv-pay-linked-tx-cell" style="display:none">
+    <select name="linked_tx_id" class="input-sm select-sm" form="{{ form_id }}">
+      <option value="">— select check —</option>
+      {% for t in claim_txs_for_select %}
+      <option value="{{ t.id }}"
+              {% if p and p.linked_tx_id == t.id %}selected{% endif %}>
+        #{{ t.sequence_number }} {{ t.type }} {{ t.date or '' }}
+      </option>
+      {% endfor %}
+    </select>
+  </td>
+  <td class="actions-col">
+    <button class="btn btn-primary btn-sm" form="{{ form_id }}" type="submit">Save</button>
+    <button type="button" class="btn btn-ghost btn-sm"
+            onclick="document.getElementById('inv-pay-new-row-placeholder').outerHTML='<tr id=&quot;inv-pay-new-row-placeholder&quot;></tr>'">
+      ✕
+    </button>
+  </td>
+</tr>
+
+<script>
+(function() {
+  const f = document.createElement('form');
+  f.id = '{{ form_id }}';
+  f.setAttribute('hx-post', '{{ save_url }}');
+  f.setAttribute('hx-target', '#{{ row_id }}');
+  f.setAttribute('hx-swap', 'outerHTML');
+  f.style.display = 'none';
+  document.body.appendChild(f);
+  htmx.process(f);
+
+  window.invPayMethodChange = function(sel) {
+    const cell = document.getElementById('inv-pay-linked-tx-cell');
+    if (cell) cell.style.display = sel.value === 'recoup' ? '' : 'none';
+  };
+
+  // Init visibility
+  const sel = document.getElementById('inv-pay-method-sel');
+  if (sel) invPayMethodChange(sel);
+})();
+</script>

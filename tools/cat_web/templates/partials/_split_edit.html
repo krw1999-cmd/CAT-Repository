@@ -13,8 +13,15 @@
     </select>
   </td>
   <td>
-    <input type="text" name="name" class="input-sm" style="min-width:140px"
-           value="{{ split.name if split else '' }}" form="{{ form_id }}">
+    <select name="recipient_id" class="input-sm select-sm" form="{{ form_id }}" style="min-width:140px">
+      <option value="">— select —</option>
+      {% for r in fee_recipients %}
+      <option value="{{ r.id }}"
+              {% if split and split.recipient_id == r.id %}selected{% endif %}>
+        {{ r.name }}
+      </option>
+      {% endfor %}
+    </select>
   </td>
   <td>
     <input type="number" name="split_pct" step="0.01" class="input-sm input-num"

@@ -1,35 +1,55 @@
 {% set tx_type_lower = (tx.type or '')|lower|replace(' ', '-') %}
 {% set is_escrow = (tx.type or '')|lower == 'escrow' %}
 {% set is_released = (tx.type or '')|lower in ['carrier', 'draw', 'escrow endorsed'] %}
+{% set is_void = tx.void %}
 
 {# Choose display values: prefer disbursement-computed if present #}
 {% if tx.get('has_disbursements') %}
   {% set show_fee_owed      = tx.disburse_fee_owed %}
   {% set show_fee_collected = tx.disburse_fee_collected %}
   {% set show_deferred      = tx.disburse_fee_deferred %}
+  {% set show_recouped      = [tx.disburse_fee_recouped or 0, tx.recouped or 0] | max %}
   {% set show_net_insured   = tx.net_to_insured %}
   {% set show_vendors       = tx.to_vendors %}
 {% else %}
   {% set show_fee_owed      = tx.fee_owed or 0 %}
   {% set show_fee_collected = tx.fee_collected or 0 %}
   {% set show_deferred      = tx.deferred or 0 %}
+  {% set show_recouped      = tx.recouped or 0 %}
   {% set show_net_insured   = 0 %}
   {% set show_vendors       = 0 %}
 {% endif %}
 
-<tr id="tx-{{ tx.id }}" class="row-link tx-type-row tx-border-{{ tx_type_lower }}"
+<tr id="tx-{{ tx.id }}" class="row-link tx-type-row tx-border-{{ tx_type_lower }}{% if is_void %} tx-row-void{% endif %}"
     onclick="location.href='{{ url_for('tx_detail', claim_id=claim.id, tx_id=tx.id) }}'">
-  <td>{{ tx.sequence_number or '' }}</td>
+  <td>{{ tx.check_number or '' }}</td>
   <td class="nowrap">{{ tx.date or '—' }}</td>
   <td>
     <span class="tx-type-badge tx-type-{{ tx_type_lower }}">{{ tx.type or '—' }}</span>
+    {% if is_void %}<span class="void-stamp">VOID</span>{% endif %}
   </td>
   <td class="num">{{ (tx.amount or 0) | money }}</td>
   <td>
-    {% if is_escrow %}
+    {% if is_void %}
+      <span class="status-badge status-void">Void</span>
+    {% elif is_escrow %}
       <span class="status-badge status-planned">Planned</span>
     {% elif is_released %}
-      <span class="status-badge status-released">Released</span>
+      {% if tx.all_disburse_received %}
+        <span id="tx-status-{{ tx.id }}" class="status-badge status-released">Released</span>
+      {% else %}
+        <span id="tx-status-{{ tx.id }}" class="status-badge status-inv-pending">Pending</span>
+      {% endif %}
+    {% elif (tx.type or '')|lower == 'fee invoice' and not tx.void %}
+      {% set paid = tx.amount_paid or 0 %}
+      {% set total = tx.amount or 0 %}
+      {% if paid >= total - 0.005 and total > 0 %}
+        <span class="status-badge status-released">Paid</span>
+      {% elif paid > 0 %}
+        <span class="status-badge status-inv-partial">Partial</span>
+      {% else %}
+        <span class="status-badge status-inv-unpaid">Unpaid</span>
+      {% endif %}
     {% endif %}
   </td>
   <td class="num">{% if show_net_insured %}{{ show_net_insured | money }}{% else %}—{% endif %}</td>
@@ -37,6 +57,7 @@
   <td class="num">{{ show_fee_owed | money }}</td>
   <td class="num">{{ show_fee_collected | money }}</td>
   <td class="num">{{ show_deferred | money }}</td>
+  <td class="num">{{ show_recouped | money }}</td>
   <td>{{ tx.notes or '' }}</td>
   <td class="actions-col nowrap" onclick="event.stopPropagation()">
     <button class="btn-icon"

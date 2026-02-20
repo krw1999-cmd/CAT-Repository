@@ -1,0 +1,44 @@
+<section class="section">
+  <div class="section-header">
+    <h3>WP Payroll Splits</h3>
+    <span class="text-muted text-small">
+      Total: <strong>{{ "%.2f"|format(splits|sum(attribute='split_pct')) }}%</strong>
+      &nbsp;·&nbsp;
+      WP Amount: <strong>{{ (expense.wp_amount or 0) | money }}</strong>
+    </span>
+  </div>
+  <div class="table-wrap">
+    <table class="table table-compact">
+      <thead>
+        <tr>
+          <th>Role</th>
+          <th>Name</th>
+          <th class="num">Split %</th>
+          <th class="num">Amount</th>
+          <th class="actions-col"></th>
+        </tr>
+      </thead>
+      <tbody id="exp-split-tbody">
+        {% for split in splits %}
+          {% include "partials/_exp_split_row.html" %}
+        {% endfor %}
+        <tr id="exp-split-new-row-placeholder"></tr>
+      </tbody>
+    </table>
+  </div>
+  <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap">
+    <button class="btn btn-ghost btn-sm"
+            hx-get="{{ url_for('exp_split_new_row', claim_id=claim.id, exp_id=expense.id) }}"
+            hx-target="#exp-split-new-row-placeholder"
+            hx-swap="outerHTML">
+      + Add Row
+    </button>
+    <button class="btn btn-ghost btn-sm"
+            hx-post="{{ url_for('exp_split_seed', claim_id=claim.id, exp_id=expense.id) }}"
+            hx-target="#exp-splits-section"
+            hx-swap="innerHTML"
+            hx-confirm="Reset splits from claim defaults? This will replace all current splits.">
+      ↺ Re-seed from Assignees
+    </button>
+  </div>
+</section>

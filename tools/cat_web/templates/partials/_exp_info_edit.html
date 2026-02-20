@@ -1,0 +1,97 @@
+<form hx-post="{{ url_for('exp_info_save', claim_id=claim.id, exp_id=expense.id) }}"
+      hx-target="#exp-info"
+      hx-swap="innerHTML">
+  <div class="card claim-header">
+    <div style="display:flex; flex-wrap:wrap; gap:14px; flex:1">
+
+      <div class="field" style="min-width:130px">
+        <label>Invoice Date</label>
+        <input type="date" name="invoice_date" class="input-sm"
+               value="{{ expense.invoice_date or '' }}">
+      </div>
+
+      <div class="field" style="min-width:130px">
+        <label>Invoice #</label>
+        <input type="text" name="invoice_number" class="input-sm"
+               value="{{ expense.invoice_number or '' }}">
+      </div>
+
+      <div class="field" style="min-width:200px">
+        <label>Payee</label>
+        <input type="text" name="payee_name" class="input-sm"
+               list="exp-info-payee-dl"
+               id="exp-info-payee-input"
+               value="{{ expense.payee_name or '' }}"
+               placeholder="Search vendors or type name"
+               autocomplete="off"
+               oninput="expInfoSyncVendorId(this.value)">
+        <input type="hidden" name="vendor_id"
+               id="exp-info-vendor-id"
+               value="{{ expense.vendor_id or '' }}">
+        <datalist id="exp-info-payee-dl">
+          {% for v in vendors %}
+          <option value="{{ v.name }}" data-id="{{ v.id }}"></option>
+          {% endfor %}
+        </datalist>
+      </div>
+
+      <div class="field" style="min-width:240px; max-width:360px">
+        <label>Reason</label>
+        <input type="text" name="reason" class="input-sm"
+               value="{{ expense.reason or '' }}">
+      </div>
+
+      <div class="field" style="min-width:120px">
+        <label>Invoice Amount</label>
+        <input type="number" name="invoice_amount" step="0.01" class="input-sm input-num"
+               value="{{ expense.invoice_amount or '' }}">
+      </div>
+
+      <div class="field" style="min-width:120px">
+        <label>Client Owes</label>
+        <input type="number" name="client_amount" step="0.01" class="input-sm input-num"
+               value="{{ expense.client_amount or '' }}">
+      </div>
+
+      <div class="field" style="min-width:120px">
+        <label>WP Owes</label>
+        <input type="number" name="wp_amount" step="0.01" class="input-sm input-num"
+               value="{{ expense.wp_amount or '' }}">
+      </div>
+
+      {# Legacy pass-throughs #}
+      <input type="hidden" name="responsible_party" value="{{ expense.responsible_party or '' }}">
+      <input type="hidden" name="unpaid_to_payee"   value="{{ expense.unpaid_to_payee or 0 }}">
+      <input type="hidden" name="client_outstanding" value="{{ expense.client_outstanding or 0 }}">
+      <input type="hidden" name="wp_outstanding"     value="{{ expense.wp_outstanding or 0 }}">
+
+    </div>
+    <div class="header-actions" style="display:flex; gap:8px; align-self:flex-start; margin-top:20px">
+      <button type="submit" class="btn btn-primary btn-sm">Save</button>
+      <button type="button" class="btn btn-ghost btn-sm"
+              hx-get="{{ url_for('exp_info_view', claim_id=claim.id, exp_id=expense.id) }}"
+              hx-target="#exp-info"
+              hx-swap="innerHTML">
+        Cancel
+      </button>
+    </div>
+  </div>
+</form>
+<script>
+(function() {
+  // Build vendor map from datalist
+  const dl = document.getElementById('exp-info-payee-dl');
+  const vendorMap = {};
+  if (dl) {
+    Array.from(dl.options).forEach(opt => {
+      vendorMap[opt.value.toLowerCase()] = opt.dataset.id;
+    });
+  }
+  window.expInfoSyncVendorId = function(val) {
+    const hiddenEl = document.getElementById('exp-info-vendor-id');
+    if (!hiddenEl) return;
+    const match = vendorMap[val.trim().toLowerCase()];
+    hiddenEl.value = match || '';
+  };
+})();
+</script>

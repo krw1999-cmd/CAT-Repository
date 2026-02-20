@@ -11,11 +11,43 @@
     <div class="summary-card summary-escrow">
       <span class="summary-label">In Escrow</span>
       <span class="summary-value">{{ summary.in_escrow | money }}</span>
-      <span class="summary-sub">Unresolved escrow</span>
+      <span class="summary-sub">Planned escrow</span>
+    </div>
+    <div class="summary-card">
+      <span class="summary-label">Draw Total</span>
+      <span class="summary-value">{{ summary.draw | money }}</span>
+      {% if summary.in_escrow > 0 %}
+        <span class="summary-sub">{{ ((summary.draw / summary.in_escrow) * 100) | round(0) | int }}% of escrow</span>
+      {% endif %}
+    </div>
+    <div class="summary-card {% if summary.draw_vs_escrow > 0 %}summary-warning{% endif %}">
+      <span class="summary-label">Draw vs Escrow</span>
+      <span class="summary-value">
+        {%- if summary.draw_vs_escrow > 0 -%}
+          +{{ summary.draw_vs_escrow | money }}
+        {%- else -%}
+          {{ summary.draw_vs_escrow | money }}
+        {%- endif -%}
+      </span>
+      <span class="summary-sub">
+        {%- if summary.draw_vs_escrow > 0 -%}
+          Over plan
+        {%- elif summary.draw_vs_escrow < 0 -%}
+          Remaining
+        {%- else -%}
+          On plan
+        {%- endif -%}
+      </span>
+    </div>
+    <div class="summary-card">
+      <span class="summary-label">Carrier</span>
+      <span class="summary-value">{{ summary.carrier | money }}</span>
+      <span class="summary-sub">Direct carrier payments</span>
     </div>
     <div class="summary-card">
       <span class="summary-label">Net to Insured</span>
       <span class="summary-value">{{ summary.net_to_insured | money }}</span>
+      <span class="summary-sub">After insured fee invoices</span>
     </div>
     <div class="summary-card">
       <span class="summary-label">To Vendors</span>
@@ -24,10 +56,12 @@
     <div class="summary-card highlight">
       <span class="summary-label">Fee Owed</span>
       <span class="summary-value">{{ summary.total_fee_owed | money }}</span>
+      <span class="summary-sub">Escrow + Carrier + Endorsed</span>
     </div>
     <div class="summary-card highlight">
       <span class="summary-label">Fee Collected</span>
       <span class="summary-value">{{ summary.total_fee_collected | money }}</span>
+      <span class="summary-sub">Draw + Carrier + Endorsed + Invoice</span>
     </div>
     <div class="summary-card">
       <span class="summary-label">Deferred</span>
@@ -36,6 +70,27 @@
     <div class="summary-card">
       <span class="summary-label">Recouped</span>
       <span class="summary-value">{{ summary.total_recouped | money }}</span>
+    </div>
+    <div class="summary-card {% if summary.deferred_vs_recouped > 0 %}summary-warning{% endif %}">
+      <span class="summary-label">Deferred vs Recouped</span>
+      <span class="summary-value">
+        {%- if summary.deferred_vs_recouped > 0 -%}
+          {{ summary.deferred_vs_recouped | money }}
+        {%- elif summary.deferred_vs_recouped < 0 -%}
+          -{{ (summary.deferred_vs_recouped * -1) | money }}
+        {%- else -%}
+          {{ 0 | money }}
+        {%- endif -%}
+      </span>
+      <span class="summary-sub">
+        {%- if summary.deferred_vs_recouped > 0 -%}
+          Outstanding
+        {%- elif summary.deferred_vs_recouped < 0 -%}
+          Over-recouped
+        {%- else -%}
+          Fully recouped
+        {%- endif -%}
+      </span>
     </div>
     <div class="summary-card">
       <span class="summary-label">Outstanding Exp.</span>

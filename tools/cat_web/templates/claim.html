@@ -32,7 +32,7 @@
         </tr>
       </thead>
       <tbody id="limits-tbody">
-        {% for lim in limits %}
+        {% for limit in limits %}
           {% include "partials/_limit_row.html" %}
         {% endfor %}
         <tr id="limit-new-row-placeholder"></tr>
@@ -66,6 +66,7 @@
           <th class="num">Fee Owed</th>
           <th class="num">Fee Coll.</th>
           <th class="num">Deferred</th>
+          <th class="num">Recouped</th>
           <th>Notes</th>
           <th class="actions-col"></th>
         </tr>
@@ -100,11 +101,12 @@
     <table class="table table-compact">
       <thead>
         <tr>
-          <th>Invoice Date</th>
+          <th>Date</th>
           <th>Payee</th>
           <th class="num">Amount</th>
-          <th>Responsible Party</th>
-          <th class="num">Unpaid to Payee</th>
+          <th>Type</th>
+          <th>Status</th>
+          <th class="num">Outst. to Payee</th>
           <th class="num">Client Outst.</th>
           <th class="num">WP Outst.</th>
           <th class="actions-col"></th>
