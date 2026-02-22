@@ -11,9 +11,9 @@
 {# ── Date filter (server-side) ─────────────────────────────────────────────── #}
 <form method="get" action="{{ url_for('site_payroll') }}" style="display:flex; gap:8px; align-items:center; margin-bottom:20px; flex-wrap:wrap">
   <label class="text-muted text-small">Date range:</label>
-  <input type="date" name="date_from" value="{{ date_from }}" class="input-sm" style="width:140px">
+  <input type="date" min="2000-01-01" max="2099-12-31" name="date_from" value="{{ date_from }}" class="input-sm" style="width:140px">
   <span class="text-muted">to</span>
-  <input type="date" name="date_to" value="{{ date_to }}" class="input-sm" style="width:140px">
+  <input type="date" min="2000-01-01" max="2099-12-31" name="date_to" value="{{ date_to }}" class="input-sm" style="width:140px">
   <button type="submit" class="btn btn-primary btn-sm">Filter</button>
 </form>
 
@@ -119,16 +119,26 @@
                           hx-vals='{"paid_date": ""}'
                           hx-target="#split-status-{{ row.split_id }}"
                           hx-swap="outerHTML"
-                          title="Click to unmark paid">✓ {{ row.payroll_paid_date or 'Paid' }}</button>
+                          title="Click to unmark paid">✓</button>
+                  <span class="payroll-date-display">{{ row.payroll_paid_date or '—' }}</span>
+                  <button type="button" class="btn-icon payroll-edit-date-btn"
+                          onclick="payrollStartEditDate(this)" title="Edit date">✎</button>
+                  <span class="payroll-date-editor" style="display:none">
+                    <input type="date" min="2000-01-01" max="2099-12-31" name="paid_date" value="{{ row.payroll_paid_date or '' }}" class="input-sm payroll-date-edit">
+                    <button type="button" class="btn btn-primary btn-sm"
+                            onclick="payrollSaveDate(this,'{{ url_for('site_split_set_date', sid=row.split_id) }}','#split-status-{{ row.split_id }}')">Save</button>
+                    <button type="button" class="btn btn-ghost btn-sm"
+                            onclick="payrollCancelDate(this)">Cancel</button>
+                  </span>
                   {% elif row.status == 'partial' %}
                   <span class="status-badge status-inv-pending">Partial {{ row.payroll_paid | money }}</span>
                   {% else %}
                   <button type="button" class="btn-icon"
                           hx-post="{{ url_for('site_split_toggle_paid', sid=row.split_id) }}"
-                          hx-vals='{"paid_date": ""}'
+                          hx-include="closest .payroll-subsection find .card-pay-date"
                           hx-target="#split-status-{{ row.split_id }}"
                           hx-swap="outerHTML"
-                          title="Mark paid today">✓</button>
+                          title="Mark paid">✓</button>
                   {% endif %}
                 </span>
               </td>
@@ -138,7 +148,7 @@
         </table>
       </div>
       <div class="payroll-subsection-footer">
-        <label>Pay date: <input type="date" class="input-sm card-pay-date" value="{{ date_to }}" style="width:140px"></label>
+        <label class="text-muted text-small">Pay date: <input type="date" min="2000-01-01" max="2099-12-31" name="paid_date" class="input-sm card-pay-date" value="{{ date_to }}" style="width:140px"></label>
         <button type="button" class="btn btn-primary btn-sm" onclick="markSectionPaid(this, 'received')">Mark Selected Paid</button>
       </div>
     </div>
@@ -224,10 +234,10 @@
                 <input type="checkbox" name="exp_split_ids[]" value="{{ row.exp_split_id }}" class="row-check exp-check">
                 {% endif %}
               </td>
-              <td><a href="{{ url_for('claim_detail', claim_id=row.claim_id) }}" class="text-muted">{{ row.job_number or '—' }}</a></td>
+              <td><a href="{{ url_for('claim_detail', claim_id=row.claim_id) }}">{{ row.job_number or '—' }}</a></td>
               <td>{{ row.insured_name or '—' }}</td>
               <td>{{ row.date or '—' }}</td>
-              <td>{{ row.vendor or '—' }}</td>
+              <td><a href="{{ url_for('expense_detail', claim_id=row.claim_id, exp_id=row.exp_id) }}">{{ row.vendor or '—' }}</a></td>
               <td class="capitalize">{{ row.role }}</td>
               <td class="num">{{ "%.2f"|format(row.split_pct or 0) }}%</td>
               <td class="num"><strong>{{ row.owed | money }}</strong></td>
@@ -239,16 +249,26 @@
                           hx-vals='{"paid_date": ""}'
                           hx-target="#exp-split-status-{{ row.exp_split_id }}"
                           hx-swap="outerHTML"
-                          title="Click to unmark paid">✓ {{ row.payroll_paid_date or 'Paid' }}</button>
+                          title="Click to unmark paid">✓</button>
+                  <span class="payroll-date-display">{{ row.payroll_paid_date or '—' }}</span>
+                  <button type="button" class="btn-icon payroll-edit-date-btn"
+                          onclick="payrollStartEditDate(this)" title="Edit date">✎</button>
+                  <span class="payroll-date-editor" style="display:none">
+                    <input type="date" min="2000-01-01" max="2099-12-31" name="paid_date" value="{{ row.payroll_paid_date or '' }}" class="input-sm payroll-date-edit">
+                    <button type="button" class="btn btn-primary btn-sm"
+                            onclick="payrollSaveDate(this,'{{ url_for('site_expense_split_set_date', sid=row.exp_split_id) }}','#exp-split-status-{{ row.exp_split_id }}')">Save</button>
+                    <button type="button" class="btn btn-ghost btn-sm"
+                            onclick="payrollCancelDate(this)">Cancel</button>
+                  </span>
                   {% elif row.status == 'partial' %}
                   <span class="status-badge status-inv-pending">Partial {{ row.payroll_paid | money }}</span>
                   {% else %}
                   <button type="button" class="btn-icon"
                           hx-post="{{ url_for('site_expense_split_toggle_paid', sid=row.exp_split_id) }}"
-                          hx-vals='{"paid_date": ""}'
+                          hx-include="closest .payroll-subsection find .card-pay-date"
                           hx-target="#exp-split-status-{{ row.exp_split_id }}"
                           hx-swap="outerHTML"
-                          title="Click to unmark paid">✓</button>
+                          title="Mark paid">✓</button>
                   {% endif %}
                 </span>
               </td>
@@ -258,7 +278,7 @@
         </table>
       </div>
       <div class="payroll-subsection-footer">
-        <label>Pay date: <input type="date" class="input-sm card-pay-date" value="{{ date_to }}" style="width:140px"></label>
+        <label class="text-muted text-small">Pay date: <input type="date" min="2000-01-01" max="2099-12-31" name="paid_date" class="input-sm card-pay-date" value="{{ date_to }}" style="width:140px"></label>
         <button type="button" class="btn btn-primary btn-sm" onclick="markSectionPaid(this, 'expenses')">Mark Selected Paid</button>
       </div>
     </div>
@@ -320,6 +340,32 @@ button.payroll-unmark-btn {
   opacity: 0.85;
 }
 button.payroll-unmark-btn:hover { opacity: 1; text-decoration: line-through; }
+.payroll-date-display {
+  font-size: 12px;
+  color: var(--text);
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.payroll-edit-date-btn {
+  font-size: 11px;
+  opacity: 0.4;
+  margin-left: 2px;
+  vertical-align: middle;
+}
+.payroll-edit-date-btn:hover { opacity: 1; }
+.payroll-date-editor {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+.payroll-date-edit {
+  width: 120px;
+  font-size: 11px;
+  padding: 2px 4px;
+  height: auto;
+}
 .payroll-subsection-footer {
   display: flex;
   align-items: center;
@@ -331,6 +377,24 @@ button.payroll-unmark-btn:hover { opacity: 1; text-decoration: line-through; }
 </style>
 
 <script>
+function payrollStartEditDate(btn) {
+  const cell = btn.closest('span[id]');
+  cell.querySelector('.payroll-date-display').style.display = 'none';
+  btn.style.display = 'none';
+  cell.querySelector('.payroll-date-editor').style.display = '';
+}
+function payrollCancelDate(btn) {
+  const cell = btn.closest('span[id]');
+  cell.querySelector('.payroll-date-editor').style.display = 'none';
+  cell.querySelector('.payroll-date-display').style.display = '';
+  cell.querySelector('.payroll-edit-date-btn').style.display = '';
+}
+function payrollSaveDate(btn, url, target) {
+  const cell = btn.closest('span[id]');
+  const input = cell.querySelector('input[name="paid_date"]');
+  htmx.ajax('POST', url, {target: target, swap: 'outerHTML', values: {paid_date: input.value}});
+}
+
 function applyFilters() {
   const section = document.getElementById('filter-section').value;
   const paid    = document.getElementById('filter-paid').value;
@@ -384,8 +448,8 @@ function toggleCardChecks(headerCheckbox, sectionType) {
 function markSectionPaid(btn, sectionType) {
   const sub = btn.closest('.payroll-subsection');
   const card = btn.closest('.payroll-card');
-  const payDateInput = card.querySelector('.card-pay-date');
-  const payDate = (payDateInput && payDateInput.value) || new Date().toISOString().slice(0,10);
+  const payDateInput = sub.querySelector('.card-pay-date');
+  const payDate = payDateInput ? payDateInput.value : new Date().toISOString().slice(0,10);
 
   const splitInputs = sectionType === 'received'
     ? sub.querySelectorAll('input[name="split_ids[]"]:checked')

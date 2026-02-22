@@ -6,7 +6,7 @@
 
       <div class="field" style="min-width:130px">
         <label>Invoice Date</label>
-        <input type="date" name="invoice_date" class="input-sm"
+        <input type="date" min="2000-01-01" max="2099-12-31" name="invoice_date" class="input-sm"
                value="{{ expense.invoice_date or '' }}">
       </div>
 

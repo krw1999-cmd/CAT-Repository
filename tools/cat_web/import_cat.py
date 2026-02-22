@@ -82,6 +82,14 @@ def _str(v) -> str:
     return str(v).strip()
 
 
+def _str_id(v) -> str:
+    """Like _str but strips trailing '.0' that Excel adds to whole-number values."""
+    s = _str(v)
+    if s.endswith(".0") and s[:-2].lstrip("-").isdigit():
+        return s[:-2]
+    return s
+
+
 def _clean_amount(v) -> float:
     """Parse a dollar amount from various formats."""
     if v is None:
@@ -141,19 +149,22 @@ def _row_values(ws, row: int, start_col: int = 1, max_cols: int = 15) -> list:
 
 
 def _parse_subtab_sheet(ws) -> dict:
-    """Extract fee amounts from a per-payee sub-tab sheet.
+    """Extract fee amounts and received status from a per-payee sub-tab sheet.
 
     Sub-tab layout (labeled rows, col A = label, col B = value):
         R7  C1="FEE %"          C2=0.15   → fee_pct = 15.0
         R8  C1="RECOUPED FEES+" C2=amount → fee_recouped
         R9  C1="DEFERED FEES -" C2=amount → fee_deferred
-        R11 C4="WAYPOINT FEE"   C5=amount  C6="Collected"/"NOT Collected"
+        R10 C3="Confirmed"/"Unconfirmed"  → client_received
+        R11 C4="WAYPOINT FEE"   C5=amount C6="Confirmed"/"Unconfirmed" → fee_received/fee_collected
     """
     out = {
-        "fee_pct":       0.0,
-        "fee_deferred":  0.0,
-        "fee_recouped":  0.0,
-        "fee_collected": 0.0,
+        "fee_pct":        0.0,
+        "fee_deferred":   0.0,
+        "fee_recouped":   0.0,
+        "fee_collected":  0.0,
+        "client_received": False,
+        "fee_received":   False,
     }
     try:
         # Labeled header rows: col A (1) = label, col B (2) = value
@@ -163,20 +174,29 @@ def _parse_subtab_sheet(ws) -> dict:
             if "FEE %" in label:
                 out["fee_pct"] = _clean_pct(val) if val is not None else 0.0
             elif "RECOUP" in label:
-                out["fee_recouped"] = abs(_clean_amount(val)) if val is not None else 0.0
+                out["fee_recouped"] = round(abs(_clean_amount(val)), 2) if val is not None else 0.0
             elif "DEFER" in label:
                 # label is "DEFERED FEES -" (note: one F, intentional in Excel)
-                out["fee_deferred"] = abs(_clean_amount(val)) if val is not None else 0.0
+                out["fee_deferred"] = round(abs(_clean_amount(val)), 2) if val is not None else 0.0
 
-        # Fee collected: col D (4) = "WAYPOINT FEE", col E (5) = amount,
-        # col F (6) = "Collected" or "NOT Collected"
+        # C10: client received status (col C = 3, row 10)
+        c10 = _str(_cell_value(ws, 10, 3)).lower()
+        out["client_received"] = bool(c10 and "confirm" in c10 and "unconfirm" not in c10)
+
+        # Fee received: col D (4) = "WAYPOINT FEE", col E (5) = amount,
+        # col F (6) = "Confirmed"/"Unconfirmed"  (or legacy "Collected"/"NOT Collected")
         for r in range(8, 16):
             d_val = _cell_value(ws, r, 4)
             if d_val and "WAYPOINT FEE" in str(d_val).upper():
                 status_s = _str(_cell_value(ws, r, 6)).lower()
-                if "collected" in status_s and "not" not in status_s:
+                is_received = (
+                    ("confirm" in status_s and "unconfirm" not in status_s)
+                    or ("collect" in status_s and "not" not in status_s)
+                )
+                if is_received:
                     amt_v = _cell_value(ws, r, 5)
-                    out["fee_collected"] = abs(_clean_amount(amt_v)) if amt_v is not None else 0.0
+                    out["fee_collected"] = round(abs(_clean_amount(amt_v)), 2) if amt_v is not None else 0.0
+                    out["fee_received"] = True
                 break
     except Exception:
         pass
@@ -308,12 +328,12 @@ def _parse_summary_sheet(ws) -> tuple[dict, list[dict], list[str]]:
                 elif "job" in vs and ("#" in vs or "no" in vs or "number" in vs) and not claim["job_number"]:
                     nv = _take_adjacent(r, c)
                     if nv:
-                        claim["job_number"] = _str(nv)
+                        claim["job_number"] = _str_id(nv)
 
                 elif "claim" in vs and ("#" in vs or "no" in vs or "number" in vs) and not claim["claim_number"]:
                     nv = _take_adjacent(r, c)
                     if nv:
-                        claim["claim_number"] = _str(nv)
+                        claim["claim_number"] = _str_id(nv)
 
         # ---- Policy limits ----
         # Locate "Base Limit" header to anchor the column layout.
@@ -497,6 +517,7 @@ def _parse_transaction_sheet(ws, name: str, wb=None) -> tuple[dict, list[str]]:
         "amount":        0.0,
         "payer":         "",
         "payees_text":   "",
+        "void":          False,
         "coverages":     [],
         "disbursements": [],
         "splits":        [],
@@ -505,6 +526,11 @@ def _parse_transaction_sheet(ws, name: str, wb=None) -> tuple[dict, list[str]]:
 
     try:
         max_row = min(ws.max_row or 200, 300)
+
+        # ---- G11: void marker ----
+        g11 = _str(_cell_value(ws, 11, 7)).lower()
+        if "void" in g11:
+            tx["void"] = True
 
         # ---- Scan header fields (rows 1–25) ----
         for r in range(1, min(max_row + 1, 25)):
@@ -688,7 +714,7 @@ def _parse_transaction_sheet(ws, name: str, wb=None) -> tuple[dict, list[str]]:
                     disb = {
                         "recipient_type":    recipient_type,
                         "recipient_name":    name_s,
-                        "amount":            abs(amt),
+                        "amount":            round(abs(amt), 2),
                         "fee_pct":           None,
                         "fee_owed":          0.0,
                         "fee_collected":     0.0,
@@ -696,6 +722,8 @@ def _parse_transaction_sheet(ws, name: str, wb=None) -> tuple[dict, list[str]]:
                         "fee_recouped":      0.0,
                         "fee_deferred_flag": False,
                         "fee_recouped_flag": False,
+                        "client_received":   False,
+                        "fee_received":      False,
                     }
 
                     # Pull fee details from per-payee sub-tab if available
@@ -703,13 +731,15 @@ def _parse_transaction_sheet(ws, name: str, wb=None) -> tuple[dict, list[str]]:
                     if subtab_name and wb is not None and subtab_name in wb.sheetnames:
                         try:
                             sub = _parse_subtab_sheet(wb[subtab_name])
-                            disb["fee_pct"]       = sub["fee_pct"] or None
-                            disb["fee_deferred"]  = sub["fee_deferred"]
-                            disb["fee_recouped"]  = sub["fee_recouped"]
-                            disb["fee_collected"] = sub["fee_collected"]
-                            disb["fee_owed"]      = round(abs(amt) * (sub["fee_pct"] / 100), 2) if sub["fee_pct"] else 0.0
-                            disb["fee_deferred_flag"] = sub["fee_deferred"] > 0
-                            disb["fee_recouped_flag"] = sub["fee_recouped"] > 0
+                            disb["fee_pct"]        = sub["fee_pct"] or None
+                            disb["fee_deferred"]   = sub["fee_deferred"]
+                            disb["fee_recouped"]   = sub["fee_recouped"]
+                            # fee_collected left at 0 — user fills in post-import
+                            disb["fee_owed"]       = round(abs(amt) * (sub["fee_pct"] / 100), 2) if sub["fee_pct"] else 0.0
+                            disb["fee_deferred_flag"]  = sub["fee_deferred"] > 0
+                            disb["fee_recouped_flag"]  = sub["fee_recouped"] > 0
+                            disb["client_received"]    = sub["client_received"]
+                            disb["fee_received"]       = sub["fee_received"]
                         except Exception:
                             pass
 
@@ -911,6 +941,7 @@ def _parse_expense_sheet(ws, name: str) -> tuple[dict, list[str]]:
         "wp_amount":         None,
         "client_paid":       0.0,    # client paid to payee (R13)
         "wp_paid":           0.0,    # WP paid to payee (R14)
+        "splits":            [],
         "parse_warnings":    warnings,
     }
 
@@ -1002,6 +1033,36 @@ def _parse_expense_sheet(ws, name: str) -> tuple[dict, list[str]]:
             exp["client_amount"] = 0.0
         if exp["wp_amount"] is None:
             exp["wp_amount"] = 0.0
+
+        # ---- Splits ----
+        splits_cell = _find_cell(ws, "splits")
+        if splits_cell:
+            sr = splits_cell.row
+            sc = splits_cell.column
+            for r in range(sr + 1, min(max_row + 1, sr + 25)):
+                role_v = _cell_value(ws, r, sc + 1)
+                name_v = _cell_value(ws, r, sc + 2)
+                pct_v  = _cell_value(ws, r, sc + 4)
+                if role_v is None and name_v is None:
+                    continue
+                role_s = _str(role_v).lower()
+                name_s = _str(name_v)
+                if not role_s and not name_s:
+                    continue
+                if role_s in ("role", "title", "splits", "name", "%", "split %", "amount"):
+                    continue
+                mapped_role = "other"
+                for key, val in ROLE_MAP.items():
+                    if key in role_s:
+                        mapped_role = val
+                        break
+                pct = _clean_pct(pct_v) if pct_v is not None else 0.0
+                if name_s or pct:
+                    exp["splits"].append({
+                        "role":      mapped_role,
+                        "name":      name_s or role_s,
+                        "split_pct": pct,
+                    })
 
     except Exception as e:
         warnings.append(f"Expense sheet '{name}' parse error: {e}")

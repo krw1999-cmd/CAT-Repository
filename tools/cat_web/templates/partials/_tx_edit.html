@@ -9,7 +9,7 @@
   <td><input name="check_number" type="text" class="input-sm input-seq"
              value="{{ tx.check_number if tx else '' }}" form="{{ form_id }}"></td>
   {# Col 2: Date #}
-  <td><input name="date" type="date" class="input-sm"
+  <td><input name="date" type="date" min="2000-01-01" max="2099-12-31" class="input-sm"
              value="{{ tx.date if tx else '' }}" form="{{ form_id }}"></td>
   {# Col 3: Type #}
   <td>

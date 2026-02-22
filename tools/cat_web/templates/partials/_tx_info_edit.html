@@ -16,7 +16,7 @@
 
       <div class="field" style="min-width:120px">
         <label>Date</label>
-        <input type="date" name="date" class="input-sm" value="{{ tx.date or '' }}">
+        <input type="date" min="2000-01-01" max="2099-12-31" name="date" class="input-sm" value="{{ tx.date or '' }}">
       </div>
 
       {% set is_fee_invoice = (tx.type or '')|lower == 'fee invoice' %}
@@ -63,7 +63,7 @@
 
       <div class="field" style="min-width:120px">
         <label>Received</label>
-        <input type="date" name="received_date" class="input-sm" value="{{ tx.received_date or '' }}">
+        <input type="date" min="2000-01-01" max="2099-12-31" name="received_date" class="input-sm" value="{{ tx.received_date or '' }}">
       </div>
 
       <div class="field" style="min-width:150px">

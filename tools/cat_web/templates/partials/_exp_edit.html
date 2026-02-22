@@ -7,7 +7,7 @@
 
 <tr id="{{ row_id }}">
   <td>
-    <input name="invoice_date" type="date" class="input-sm"
+    <input name="invoice_date" type="date" min="2000-01-01" max="2099-12-31" class="input-sm"
            value="{{ exp.invoice_date if exp else '' }}" form="{{ form_id }}">
   </td>
   <td>

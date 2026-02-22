@@ -7,7 +7,7 @@ import io
 import json
 import os
 import uuid
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from flask import (
     Flask,
@@ -46,6 +46,19 @@ def money_filter(value):
         return "${:,.2f}".format(float(value or 0))
     except (TypeError, ValueError):
         return "$0.00"
+
+
+def _clean_date(s) -> str:
+    """Return s if it is a valid YYYY-MM-DD date, otherwise empty string."""
+    if not s:
+        return ""
+    s = str(s).strip()
+    try:
+        datetime.strptime(s, "%Y-%m-%d")
+        return s
+    except ValueError:
+        return ""
+
 
 # ---------------------------------------------------------------------------
 # Auth
@@ -297,7 +310,7 @@ def tx_update(claim_id: int, tx_id: int):
     data = dict(tx_existing)
     data.update({
         "check_number":     request.form.get("check_number", "").strip() or None,
-        "date":             request.form.get("date", "").strip(),
+        "date":             _clean_date(request.form.get("date")),
         "type":             request.form.get("type", "").strip(),
         "amount":           db_module._f(request.form.get("amount")),
         "payer":            request.form.get("payer", "").strip(),
@@ -332,7 +345,7 @@ def _tx_data_from_form() -> dict:
     return {
         "sequence_number":     request.form.get("sequence_number") or None,
         "check_number":        request.form.get("check_number", "").strip() or None,
-        "date":                request.form.get("date", "").strip(),
+        "date":                _clean_date(request.form.get("date")),
         "amount":              db_module._f(request.form.get("amount")),
         "type":                request.form.get("type", "").strip(),
         "fee_owed":            db_module._f(request.form.get("fee_owed")),
@@ -406,7 +419,7 @@ def exp_delete(claim_id: int, exp_id: int):
 
 def _exp_data_from_form() -> dict:
     return {
-        "invoice_date":      request.form.get("invoice_date", "").strip(),
+        "invoice_date":      _clean_date(request.form.get("invoice_date")),
         "payee_name":        request.form.get("payee_name", "").strip(),
         "vendor_id":         request.form.get("vendor_id") or None,
         "invoice_amount":    db_module._f(request.form.get("invoice_amount")),
@@ -508,7 +521,7 @@ def exp_pay_new_row(claim_id: int, exp_id: int):
 @login_required
 def exp_pay_create(claim_id: int, exp_id: int):
     data = {
-        "date":      request.form.get("date", "").strip(),
+        "date":      (_clean_date(request.form.get("date")) or ""),
         "paid_by":   request.form.get("paid_by", "wp"),
         "amount":    db_module._f(request.form.get("amount")),
         "method":    request.form.get("method", "").strip(),
@@ -548,7 +561,7 @@ def exp_pay_view_row(claim_id: int, exp_id: int, pid: int):
 @login_required
 def exp_pay_update(claim_id: int, exp_id: int, pid: int):
     data = {
-        "date":      request.form.get("date", "").strip(),
+        "date":      (_clean_date(request.form.get("date")) or ""),
         "paid_by":   request.form.get("paid_by", "wp"),
         "amount":    db_module._f(request.form.get("amount")),
         "method":    request.form.get("method", "").strip(),
@@ -591,7 +604,7 @@ def exp_reimb_new_row(claim_id: int, exp_id: int):
 @login_required
 def exp_reimb_create(claim_id: int, exp_id: int):
     data = {
-        "date":        request.form.get("date", "").strip(),
+        "date":        (_clean_date(request.form.get("date")) or ""),
         "amount":      db_module._f(request.form.get("amount")),
         "method":      request.form.get("method", "").strip(),
         "reference":   request.form.get("reference", "").strip(),
@@ -635,7 +648,7 @@ def exp_wp_reimb_new_row(claim_id: int, exp_id: int):
 @login_required
 def exp_wp_reimb_create(claim_id: int, exp_id: int):
     data = {
-        "date":      request.form.get("date", "").strip(),
+        "date":      (_clean_date(request.form.get("date")) or ""),
         "amount":    db_module._f(request.form.get("amount")),
         "method":    request.form.get("method", "").strip(),
         "reference": request.form.get("reference", "").strip(),
@@ -947,6 +960,10 @@ def tx_detail(claim_id: int, tx_id: int):
         invoice_deferred_links = db_module.get_invoice_deferred_links(tx_id)
         claim_txs_for_select = db_module.get_claim_transactions_for_select(claim_id, exclude_tx_id=tx_id)
 
+    # Outstanding deferred (deferred − recouped) — matches the summary card value
+    _summary = db_module.get_transaction_summary(claim_id)
+    claim_total_deferred = max(0.0, float(_summary.get("deferred_vs_recouped") or 0))
+
     tx_status = _tx_display_status(disbursements)
     return render_template(
         "transaction.html",
@@ -969,6 +986,7 @@ def tx_detail(claim_id: int, tx_id: int):
         tx_status=tx_status,
         tx_status_css=_TX_STATUS_CSS[tx_status],
         tx_status_label=_TX_STATUS_LABEL[tx_status],
+        claim_total_deferred=claim_total_deferred,
     )
 
 
@@ -1008,13 +1026,13 @@ def tx_info_save(claim_id: int, tx_id: int):
     data = dict(tx)
     data.update({
         "check_number":    request.form.get("check_number", "").strip(),
-        "received_date":   request.form.get("received_date", "").strip(),
+        "received_date":   _clean_date(request.form.get("received_date")),
         "payer":           request.form.get("payer", "").strip(),
         "payees_text":     request.form.get("payees_text", "").strip(),
         "endorsed":        bool(request.form.get("endorsed")),
         "void":            bool(request.form.get("void")),
         "type":            request.form.get("type", tx.get("type", "")),
-        "date":            request.form.get("date", tx.get("date", "")),
+        "date":            _clean_date(request.form.get("date")) or tx.get("date", ""),
         "notes":           request.form.get("notes", tx.get("notes", "")),
         "linked_escrow_id": request.form.get("linked_escrow_id") or None,
         "invoice_number":  request.form.get("invoice_number", "").strip(),
@@ -1520,6 +1538,7 @@ def _disburse_totals_oob(tx_id: int, claim: dict) -> str:
         f'<span id="disburse-sidebar-fee-coll" hx-swap-oob="true">${t["fee_collected"]:,.2f}</span>'
         f'<span id="disburse-sidebar-deferred" hx-swap-oob="true">${t["fee_deferred"]:,.2f}</span>'
         f'<span id="disburse-sidebar-recouped" hx-swap-oob="true">${t["fee_recouped"]:,.2f}</span>'
+        f'<span id="disburse-sidebar-fee-to-collect" hx-swap-oob="true">${max(0.0, t["fee_owed"] + t["fee_recouped"] - t["fee_deferred"]):,.2f}</span>'
         + pct_html
         + remaining_html
         + _split_totals_only_oob(tx_id)
@@ -2014,7 +2033,7 @@ def payment_new_row(claim_id: int, tx_id: int):
 @login_required
 def payment_create(claim_id: int, tx_id: int):
     data = {
-        "date":        request.form.get("date", "").strip(),
+        "date":        (_clean_date(request.form.get("date")) or ""),
         "amount":      db_module._f(request.form.get("amount")),
         "method":      request.form.get("method", "").strip(),
         "reference":   request.form.get("reference", "").strip(),
@@ -2064,7 +2083,7 @@ def payment_view_row(claim_id: int, tx_id: int, pid: int):
 @login_required
 def payment_update(claim_id: int, tx_id: int, pid: int):
     data = {
-        "date":         request.form.get("date", "").strip(),
+        "date":         (_clean_date(request.form.get("date")) or ""),
         "amount":       db_module._f(request.form.get("amount")),
         "method":       request.form.get("method", "").strip(),
         "reference":    request.form.get("reference", "").strip(),
@@ -2296,7 +2315,7 @@ def deferred_link_update(claim_id: int, tx_id: int, lid: int):
     deferred_tx_id = request.form.get("deferred_tx_id")
     if not deferred_tx_id:
         abort(400)
-    db_module.update_invoice_deferred_link(lid, int(deferred_tx_id))
+    db_module.update_invoice_deferred_link(lid, int(deferred_tx_id), tx_id)
     links = db_module.get_invoice_deferred_links(tx_id)
     link = next((l for l in links if l["id"] == lid), None)
     claim = db_module.get_claim(claim_id)
@@ -2308,7 +2327,7 @@ def deferred_link_update(claim_id: int, tx_id: int, lid: int):
            methods=["DELETE"])
 @login_required
 def deferred_link_delete(claim_id: int, tx_id: int, lid: int):
-    db_module.delete_invoice_deferred_link(lid)
+    db_module.delete_invoice_deferred_link(lid, tx_id)
     return ""
 
 
@@ -2435,7 +2454,7 @@ def site_payroll_export():
 @app.route("/payroll/mark-paid", methods=["POST"])
 @login_required
 def site_payroll_mark_paid_bulk():
-    paid_date = request.form.get("paid_date", date.today().isoformat())
+    paid_date = request.form.get("paid_date", "").strip() or date.today().isoformat()
     split_ids = [int(x) for x in request.form.getlist("split_ids[]") if x]
     exp_split_ids = [int(x) for x in request.form.getlist("exp_split_ids[]") if x]
     if split_ids:
@@ -2451,7 +2470,7 @@ def site_payroll_mark_paid_bulk():
 @app.route("/payroll/splits/<int:sid>/toggle-paid", methods=["POST"])
 @login_required
 def site_split_toggle_paid(sid: int):
-    paid_date = request.form.get("paid_date", date.today().isoformat())
+    paid_date = request.form.get("paid_date", "").strip() or date.today().isoformat()
     db_module.mark_split_paid_toggle(sid, paid_date)
     # Return updated status badge for this split row
     split = db_module.get_split(sid)
@@ -2461,14 +2480,14 @@ def site_split_toggle_paid(sid: int):
     earned = round(fee_collected * float(split.get("split_pct") or 0) / 100, 2)
     paid = float(split.get("payroll_paid") or 0)
     status = db_module._payroll_status(earned, paid)
-    badge = _payroll_badge_html(status, paid, split.get("payroll_paid_date") or "")
+    badge = _payroll_badge_html(status, paid, split.get("payroll_paid_date") or "", sid=sid, kind="splits")
     return f'<span id="split-status-{sid}" hx-swap-oob="true">{badge}</span>'
 
 
 @app.route("/payroll/expense-splits/<int:sid>/toggle-paid", methods=["POST"])
 @login_required
 def site_expense_split_toggle_paid(sid: int):
-    paid_date = request.form.get("paid_date", date.today().isoformat())
+    paid_date = request.form.get("paid_date", "").strip() or date.today().isoformat()
     db_module.mark_expense_split_paid_toggle(sid, paid_date)
     es_row = db_module._row(db_module.get_db(),
                             "SELECT * FROM expense_splits WHERE id=?", (sid,))
@@ -2481,18 +2500,80 @@ def site_expense_split_toggle_paid(sid: int):
     earned = round(wp_amount * float(es_row.get("split_pct") or 0) / 100, 2)
     paid = float(es_row.get("payroll_paid") or 0)
     status = db_module._payroll_status(earned, paid)
-    badge = _payroll_badge_html(status, paid, es_row.get("payroll_paid_date") or "")
+    badge = _payroll_badge_html(status, paid, es_row.get("payroll_paid_date") or "", sid=sid, kind="expense-splits")
     return f'<span id="exp-split-status-{sid}" hx-swap-oob="true">{badge}</span>'
 
 
-def _payroll_badge_html(status: str, paid: float, paid_date: str) -> str:
+@app.route("/payroll/splits/<int:sid>/set-date", methods=["POST"])
+@login_required
+def site_split_set_date(sid: int):
+    paid_date = request.form.get("paid_date", "").strip()
+    db_module.get_db().execute(
+        "UPDATE transaction_splits SET payroll_paid_date=? WHERE id=?",
+        (paid_date or None, sid),
+    )
+    db_module.get_db().commit()
+    split = db_module.get_split(sid)
+    if not split:
+        return "", 404
+    fee_collected = db_module._payroll_fee_collected_for_tx(split["transaction_id"])
+    earned = round(fee_collected * float(split.get("split_pct") or 0) / 100, 2)
+    paid = float(split.get("payroll_paid") or 0)
+    status = db_module._payroll_status(earned, paid)
+    badge = _payroll_badge_html(status, paid, split.get("payroll_paid_date") or "", sid=sid, kind="splits")
+    return f'<span id="split-status-{sid}" hx-swap-oob="true">{badge}</span>'
+
+
+@app.route("/payroll/expense-splits/<int:sid>/set-date", methods=["POST"])
+@login_required
+def site_expense_split_set_date(sid: int):
+    paid_date = request.form.get("paid_date", "").strip()
+    db_module.get_db().execute(
+        "UPDATE expense_splits SET payroll_paid_date=? WHERE id=?",
+        (paid_date or None, sid),
+    )
+    db_module.get_db().commit()
+    es_row = db_module._row(db_module.get_db(), "SELECT * FROM expense_splits WHERE id=?", (sid,))
+    if not es_row:
+        return "", 404
+    es_row = dict(es_row)
+    exp_row = db_module._row(db_module.get_db(),
+                             "SELECT wp_amount FROM expenses WHERE id=?", (es_row["expense_id"],))
+    wp_amount = float(exp_row["wp_amount"] or 0) if exp_row else 0.0
+    earned = round(wp_amount * float(es_row.get("split_pct") or 0) / 100, 2)
+    paid = float(es_row.get("payroll_paid") or 0)
+    status = db_module._payroll_status(earned, paid)
+    badge = _payroll_badge_html(status, paid, es_row.get("payroll_paid_date") or "", sid=sid, kind="expense-splits")
+    return f'<span id="exp-split-status-{sid}" hx-swap-oob="true">{badge}</span>'
+
+
+def _payroll_badge_html(status: str, paid: float, paid_date: str,
+                        sid: int = 0, kind: str = "splits") -> str:
+    """Return the inner HTML for a payroll paid-status cell."""
     if status == "paid":
-        label = f"✓ {paid_date}" if paid_date else "✓ Paid"
-        return f'<span class="status-badge status-released">{label}</span>'
+        target     = f"split-status-{sid}" if kind == "splits" else f"exp-split-status-{sid}"
+        toggle_url = f"/payroll/{kind}/{sid}/toggle-paid"
+        date_url   = f"/payroll/{kind}/{sid}/set-date"
+        date_val   = paid_date or ""
+        date_label = date_val or "—"
+        return (
+            f'<button type="button" class="status-badge status-released payroll-unmark-btn"'
+            f' hx-post="{toggle_url}" hx-vals=\'{{"paid_date":""}}\''
+            f' hx-target="#{target}" hx-swap="outerHTML"'
+            f' title="Click to unmark paid">✓</button>'
+            f'<span class="payroll-date-display">{date_label}</span>'
+            f'<button type="button" class="btn-icon payroll-edit-date-btn"'
+            f' onclick="payrollStartEditDate(this)" title="Edit date">✎</button>'
+            f'<span class="payroll-date-editor" style="display:none">'
+            f'<input type="date" name="paid_date" value="{date_val}" class="input-sm payroll-date-edit">'
+            f'<button type="button" class="btn btn-primary btn-sm"'
+            f' onclick="payrollSaveDate(this,\'{date_url}\',\'#{target}\')">Save</button>'
+            f'<button type="button" class="btn btn-ghost btn-sm"'
+            f' onclick="payrollCancelDate(this)">Cancel</button>'
+            f'</span>'
+        )
     if status == "partial":
         return f'<span class="status-badge status-inv-pending">Partial ${paid:,.2f}</span>'
-    if status == "n/a":
-        return '<span class="text-muted">—</span>'
     return '<span class="text-muted">—</span>'
 
 
@@ -2672,11 +2753,22 @@ def _do_import(form, parsed: dict) -> int:
             "fee_collected": 0.0, "reimbursed": 0.0, "total_collected": 0.0,
             "unpaid_payee_expense": 0.0, "outstanding_expense": 0.0,
             "ott": None, "notes": "", "check_id": None,
-            "endorsed": False, "void": False,
+            "endorsed": False, "void": bool(f.get(f"tx_{i}_void")),
             "linked_escrow_id": None, "inv_for": "insured", "inv_vendor_id": None,
             "proc_method": None, "proc_fee_invoice_id": None,
         }
         tx_id = db_module.create_transaction(claim_id, tx_data)
+
+        # If the Excel sheet had its own SPLITS section, replace the auto-cloned
+        # assignee splits with the per-check splits from the file.
+        parsed_txs = parsed.get("transactions") or []
+        parsed_tx_splits = parsed_txs[i]["splits"] if i < len(parsed_txs) else []
+        if parsed_tx_splits:
+            db_module.get_db().execute(
+                "DELETE FROM transaction_splits WHERE transaction_id=?", (tx_id,))
+            db_module.get_db().commit()
+            for sp in parsed_tx_splits:
+                db_module.create_split(tx_id, sp)
 
         # For fee invoices, create the payment record if checked and amount > 0
         if tx_type == "Fee Invoice" and f.get(f"tx_{i}_pay_include"):
@@ -2709,6 +2801,14 @@ def _do_import(form, parsed: dict) -> int:
                 continue
             vendor_id = f.get(f"tx_{i}_disb_{j}_vendor_id") or None
             fee_pct_raw = db_module._fopt(f.get(f"tx_{i}_disb_{j}_fee_pct"))
+            fee_owed_val  = db_module._f(f.get(f"tx_{i}_disb_{j}_fee_owed"))
+            fee_defer_val = db_module._f(f.get(f"tx_{i}_disb_{j}_fee_deferred"))
+            # Mirror the claim's "Fee Rcvd" toggle: set fee_collected = fee_owed - fee_deferred
+            fee_received = bool(f.get(f"tx_{i}_disb_{j}_fee_received"))
+            if fee_received and fee_pct_raw and fee_owed_val > 0:
+                fee_collected_val = round(max(0.0, fee_owed_val - fee_defer_val), 2)
+            else:
+                fee_collected_val = 0.0
             db_module.create_disbursement(tx_id, {
                 "sort_order":     j,
                 "recipient_type": f.get(f"tx_{i}_disb_{j}_recipient_type", "insured"),
@@ -2717,10 +2817,11 @@ def _do_import(form, parsed: dict) -> int:
                 "amount":         db_module._f(f.get(f"tx_{i}_disb_{j}_amount")),
                 "fee_applies":    bool(fee_pct_raw),
                 "fee_pct":        fee_pct_raw,
-                "fee_owed":       db_module._f(f.get(f"tx_{i}_disb_{j}_fee_owed")),
-                "fee_collected":  db_module._f(f.get(f"tx_{i}_disb_{j}_fee_collected")),
-                "fee_deferred":   db_module._f(f.get(f"tx_{i}_disb_{j}_fee_deferred")),
+                "fee_owed":       fee_owed_val,
+                "fee_collected":  fee_collected_val,
+                "fee_deferred":   fee_defer_val,
                 "fee_recouped":   db_module._f(f.get(f"tx_{i}_disb_{j}_fee_recouped")),
+                "client_received": 1 if f.get(f"tx_{i}_disb_{j}_client_received") else 0,
                 "use_check_splits": True, "notes": "",
             })
 
@@ -2744,6 +2845,16 @@ def _do_import(form, parsed: dict) -> int:
             "wp_amount":         db_module._f(f.get(f"exp_{i}_wp_amount")),
         })
 
+        # If the expense sheet had its own SPLITS section, replace auto-cloned splits.
+        parsed_exps = parsed.get("expenses") or []
+        parsed_exp_splits = parsed_exps[i]["splits"] if i < len(parsed_exps) else []
+        if parsed_exp_splits:
+            db_module.get_db().execute(
+                "DELETE FROM expense_splits WHERE expense_id=?", (exp_id,))
+            db_module.get_db().commit()
+            for sp in parsed_exp_splits:
+                db_module.create_expense_split(exp_id, sp)
+
         # Create expense_payment records for amounts already paid to payee
         client_paid = db_module._f(f.get(f"exp_{i}_client_paid"))
         if client_paid and client_paid > 0:
@@ -2761,6 +2872,44 @@ def _do_import(form, parsed: dict) -> int:
             })
 
     return claim_id
+
+
+# ---------------------------------------------------------------------------
+# Global Status
+# ---------------------------------------------------------------------------
+
+@app.route("/status")
+@login_required
+def global_status():
+    data = db_module.get_global_status()
+    return render_template("status.html", **data)
+
+
+@app.route("/status/tx/<int:tx_id>/note", methods=["POST"])
+@login_required
+def status_tx_note(tx_id: int):
+    notes = request.form.get("notes", "").strip()
+    db_module.set_status_note("tx", tx_id, notes)
+    return render_template("partials/_status_note.html",
+                           notes=notes, save_url=url_for("status_tx_note", tx_id=tx_id))
+
+
+@app.route("/status/claim/<int:claim_id>/note", methods=["POST"])
+@login_required
+def status_claim_note(claim_id: int):
+    notes = request.form.get("notes", "").strip()
+    db_module.set_status_note("claim", claim_id, notes)
+    return render_template("partials/_status_note.html",
+                           notes=notes, save_url=url_for("status_claim_note", claim_id=claim_id))
+
+
+@app.route("/status/expense/<int:exp_id>/note", methods=["POST"])
+@login_required
+def status_expense_note(exp_id: int):
+    notes = request.form.get("notes", "").strip()
+    db_module.set_status_note("expense", exp_id, notes)
+    return render_template("partials/_status_note.html",
+                           notes=notes, save_url=url_for("status_expense_note", exp_id=exp_id))
 
 
 # ---------------------------------------------------------------------------

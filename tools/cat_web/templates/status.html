@@ -1,0 +1,231 @@
+{% extends "base.html" %}
+{% block title %}Status{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h2>Global Status</h2>
+</div>
+
+{# ── 1. Pending Checks ────────────────────────────────────────────────────── #}
+<section class="section" style="margin-bottom:32px">
+  <h3 style="margin-bottom:12px">
+    Pending Checks
+    {% if pending_checks %}
+    <span class="badge badge-unpaid-inv">{{ pending_checks|length }}</span>
+    {% endif %}
+  </h3>
+  {% if pending_checks %}
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Insured</th>
+        <th>Job #</th>
+        <th>#</th>
+        <th>Type</th>
+        <th>Date</th>
+        <th class="num-col">Amount</th>
+        <th>Fee Rcvd</th>
+        <th>Client Rcvd</th>
+        <th>Notes</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for ck in pending_checks %}
+      <tr>
+        <td>{{ ck.insured_name }}</td>
+        <td>{{ ck.job_number or '—' }}</td>
+        <td>{{ ck.sequence_number or '—' }}</td>
+        <td>{{ ck.type }}</td>
+        <td>{{ ck.check_date or '—' }}</td>
+        <td class="num-col">{{ ck.amount | money }}</td>
+        <td>
+          {% if not ck.fee_applicable_count %}
+            <span class="text-muted">—</span>
+          {% elif ck.fee_not_received_count and ck.fee_not_received_count > 0 %}
+            <span class="badge badge-unpaid-inv">Pending</span>
+          {% else %}
+            <span class="badge badge-paid">✓</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if ck.pending_client_count and ck.pending_client_count > 0 %}
+            <span class="badge badge-unpaid-inv">{{ ck.pending_client_count }} pending</span>
+          {% else %}
+            <span class="badge badge-paid">✓</span>
+          {% endif %}
+        </td>
+        <td style="min-width:200px">
+          {% set notes = ck.status_notes %}
+          {% set save_url = url_for('status_tx_note', tx_id=ck.tx_id) %}
+          {% include "partials/_status_note.html" %}
+        </td>
+        <td>
+          <a href="{{ url_for('tx_detail', claim_id=ck.claim_id, tx_id=ck.tx_id) }}"
+             class="btn btn-ghost btn-sm">View →</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="text-muted">No pending checks — all fees and disbursements confirmed received.</p>
+  {% endif %}
+</section>
+
+{# ── 2. Open Escrow ───────────────────────────────────────────────────────── #}
+<section class="section" style="margin-bottom:32px">
+  <h3 style="margin-bottom:12px">
+    Money in Escrow
+    {% if open_escrow %}
+    <span class="badge badge-unpaid-inv">{{ open_escrow|length }}</span>
+    {% endif %}
+  </h3>
+  {% if open_escrow %}
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Insured</th>
+        <th>Job #</th>
+        <th>Claim #</th>
+        <th class="num-col">Escrowed</th>
+        <th class="num-col">Drawn</th>
+        <th class="num-col">Net in Escrow</th>
+        <th>Notes</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in open_escrow %}
+      <tr>
+        <td>{{ row.insured_name }}</td>
+        <td>{{ row.job_number or '—' }}</td>
+        <td>{{ row.claim_number or '—' }}</td>
+        <td class="num-col">{{ row.total_escrowed | money }}</td>
+        <td class="num-col">{{ row.total_drawn | money }}</td>
+        <td class="num-col"><strong>{{ row.net_in_escrow | money }}</strong></td>
+        <td style="min-width:200px">
+          {% set notes = row.status_notes %}
+          {% set save_url = url_for('status_claim_note', claim_id=row.claim_id) %}
+          {% include "partials/_status_note.html" %}
+        </td>
+        <td>
+          <a href="{{ url_for('claim_detail', claim_id=row.claim_id) }}"
+             class="btn btn-ghost btn-sm">View →</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="text-muted">No claims with open escrow balances.</p>
+  {% endif %}
+</section>
+
+{# ── 3. Unrecouped Deferred Fees ──────────────────────────────────────────── #}
+<section class="section" style="margin-bottom:32px">
+  <h3 style="margin-bottom:12px">
+    Unrecouped Deferred Fees
+    {% if unrecouped_deferred %}
+    <span class="badge badge-unpaid-inv">{{ unrecouped_deferred|length }}</span>
+    {% endif %}
+  </h3>
+  {% if unrecouped_deferred %}
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Insured</th>
+        <th>Job #</th>
+        <th>Claim #</th>
+        <th class="num-col">Deferred</th>
+        <th class="num-col">Recouped</th>
+        <th class="num-col">Outstanding</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in unrecouped_deferred %}
+      <tr>
+        <td>{{ row.insured_name }}</td>
+        <td>{{ row.job_number or '—' }}</td>
+        <td>{{ row.claim_number or '—' }}</td>
+        <td class="num-col">{{ row.total_deferred | money }}</td>
+        <td class="num-col">{{ row.total_recouped | money }}</td>
+        <td class="num-col"><strong>{{ row.unrecouped | money }}</strong></td>
+        <td>
+          <a href="{{ url_for('claim_detail', claim_id=row.claim_id) }}"
+             class="btn btn-ghost btn-sm">View →</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="text-muted">No claims with unrecouped deferred fees.</p>
+  {% endif %}
+</section>
+
+{# ── 4. Pending Expenses ───────────────────────────────────────────────────── #}
+<section class="section">
+  <h3 style="margin-bottom:12px">
+    Pending Expenses
+    {% if pending_expenses %}
+    <span class="badge badge-unpaid-inv">{{ pending_expenses|length }}</span>
+    {% endif %}
+  </h3>
+  {% if pending_expenses %}
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Insured</th>
+        <th style="width:80px">Job #</th>
+        <th style="width:90px">Date</th>
+        <th>Payee</th>
+        <th>Reason</th>
+        <th style="width:90px">Resp.</th>
+        <th class="num-col" style="width:90px">Invoice</th>
+        <th>Owed To</th>
+        <th style="width:200px">Notes</th>
+        <th style="width:60px"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for exp in pending_expenses %}
+      <tr>
+        <td>{{ exp.insured_name }}</td>
+        <td style="white-space:nowrap">{{ exp.job_number or '—' }}</td>
+        <td style="white-space:nowrap">{{ exp.invoice_date or '—' }}</td>
+        <td>{{ exp.payee_name or '—' }}</td>
+        <td>{{ exp.reason or '—' }}</td>
+        <td>{{ exp.responsible_party or '—' }}</td>
+        <td class="num-col">{{ exp.invoice_amount | money }}</td>
+        <td style="white-space:nowrap">
+          {% if exp.outstanding > 0.005 %}
+          <span class="badge badge-unpaid-inv">Payee {{ exp.outstanding | money }}</span>
+          {% endif %}
+          {% if exp.reimburse_owed > 0.005 %}
+          <span class="badge badge-unpaid-inv">Client→WP {{ exp.reimburse_owed | money }}</span>
+          {% endif %}
+          {% if exp.wp_reimburse_owed > 0.005 %}
+          <span class="badge badge-unpaid-inv">WP→Client {{ exp.wp_reimburse_owed | money }}</span>
+          {% endif %}
+        </td>
+        <td>
+          {% set notes = exp.status_notes %}
+          {% set save_url = url_for('status_expense_note', exp_id=exp.exp_id) %}
+          {% include "partials/_status_note.html" %}
+        </td>
+        <td>
+          <a href="{{ url_for('claim_detail', claim_id=exp.claim_id) }}"
+             class="btn btn-ghost btn-sm">View →</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="text-muted">No pending expenses.</p>
+  {% endif %}
+</section>
+
+{% endblock %}

@@ -6,7 +6,7 @@
 
 <tr id="{{ row_id }}">
   <td>
-    <input type="date" name="date" class="input-sm" form="{{ form_id }}"
+    <input type="date" min="2000-01-01" max="2099-12-31" name="date" class="input-sm" form="{{ form_id }}"
            value="{{ p.date if p else '' }}">
   </td>
   <td>

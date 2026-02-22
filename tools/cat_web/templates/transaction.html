@@ -2,6 +2,7 @@
 {% block title %}{{ tx.sequence_number or '' }} {{ tx.type or 'Transaction' }} — {{ claim.insured_name }}{% endblock %}
 
 {% block content %}
+{% set is_escrow_type = (tx.type or '')|lower == 'escrow' %}
 <div class="page-header">
   <div>
     <a href="{{ url_for('claim_detail', claim_id=claim.id) }}" class="breadcrumb">
@@ -12,13 +13,19 @@
       <span class="tx-type-badge tx-type-{{ (tx.type or 'other')|lower|replace(' ', '-') }}">
         {{ tx.type or 'Transaction' }}
       </span>
-      {% set is_escrow_type = (tx.type or '')|lower == 'escrow' %}
       {% if is_escrow_type %}
         <span class="status-badge status-planned" style="margin-left:8px">Planned</span>
       {% endif %}
     </h2>
   </div>
 </div>
+
+{# ── Deferred fee warning ──────────────────────────────────────────────────── #}
+{% if claim_total_deferred and claim_total_deferred > 0 and not is_escrow_type %}
+<div class="flash flash-warning" style="margin-bottom:12px">
+  ⚠ This claim has <strong>{{ claim_total_deferred | money }}</strong> in deferred fees outstanding.
+</div>
+{% endif %}
 
 {# ── Transaction Info ─────────────────────────────────────────────────────── #}
 <div id="tx-info">
@@ -323,6 +330,12 @@
       {% else %}
       <span id="disburse-sidebar-recouped" style="display:none">$0.00</span>
       {% endif %}
+
+      {% set fee_to_collect = (disburse_totals.fee_owed or 0) + (disburse_totals.fee_recouped or 0) - (disburse_totals.fee_deferred or 0) %}
+      <div class="sidebar-label" style="margin-top:6px;font-weight:700">To Collect</div>
+      <div class="sidebar-value highlight" style="font-weight:700">
+        <span id="disburse-sidebar-fee-to-collect">{{ fee_to_collect | money }}</span>
+      </div>
 
     {% endif %}
     </div>

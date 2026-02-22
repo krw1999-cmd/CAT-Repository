@@ -827,3 +827,25 @@ details[open] .import-check-summary::before { content: "▼"; }
 .badge-escrow-endorsed { background: #dbeafe; color: #1d4ed8; }
 .badge-draw          { background: #f0fdf4; color: #15803d; }
 .badge-carrier       { background: #ede9fe; color: #7c3aed; }
+
+/* Shared numeric column alignment */
+.num-col { text-align: right; white-space: nowrap; }
+
+/* Status page notes */
+.status-note-input {
+  width: 100%;
+  min-width: 180px;
+  padding: 4px 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  resize: vertical;
+  background: #fafafa;
+  font-family: inherit;
+  color: #374151;
+}
+.status-note-input:focus {
+  outline: none;
+  border-color: #6366f1;
+  background: #fff;
+}

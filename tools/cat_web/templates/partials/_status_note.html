@@ -1,0 +1,9 @@
+<form hx-post="{{ save_url }}"
+      hx-target="closest form"
+      hx-swap="outerHTML"
+      hx-trigger="change delay:800ms, keyup delay:800ms">
+  <textarea name="notes"
+            class="status-note-input"
+            placeholder="Add note…"
+            rows="2">{{ notes or '' }}</textarea>
+</form>

@@ -20,19 +20,19 @@
         <span class="summary-sub">{{ ((summary.draw / summary.in_escrow) * 100) | round(0) | int }}% of escrow</span>
       {% endif %}
     </div>
-    <div class="summary-card {% if summary.draw_vs_escrow > 0 %}summary-warning{% endif %}">
+    <div class="summary-card {% if summary.draw_vs_escrow > 0.005 %}summary-warning{% endif %}">
       <span class="summary-label">Draw vs Escrow</span>
       <span class="summary-value">
-        {%- if summary.draw_vs_escrow > 0 -%}
+        {%- if summary.draw_vs_escrow > 0.005 -%}
           +{{ summary.draw_vs_escrow | money }}
         {%- else -%}
           {{ summary.draw_vs_escrow | money }}
         {%- endif -%}
       </span>
       <span class="summary-sub">
-        {%- if summary.draw_vs_escrow > 0 -%}
+        {%- if summary.draw_vs_escrow > 0.005 -%}
           Over plan
-        {%- elif summary.draw_vs_escrow < 0 -%}
+        {%- elif summary.draw_vs_escrow < -0.005 -%}
           Remaining
         {%- else -%}
           On plan

@@ -32,7 +32,8 @@
 {% endif %}
 
 <div class="import-note">
-  <strong>Note:</strong> Fee fields (fee owed, collected, deferred, recouped) are set to $0 on import — fill them in on the claim page after importing.
+  <strong>Note:</strong> Fee collected is left at $0 on import — fill it in on the claim page after importing.
+  Other fee fields and client received status are pre-filled from the file's sub-tabs where available.
   Splits are auto-cloned from the assignees you approve below.
 </div>
 
@@ -154,9 +155,16 @@
         <span class="import-check-num">{{ tx.check_number or '(no #)' }}</span>
         <span class="import-check-date">{{ tx.check_date or tx.received_date or '' }}</span>
         <span class="import-check-amt">${{ "%.2f"|format(tx.amount|float) }}</span>
+        {% if tx.void %}
+        <span class="import-warn-badge" style="background:#e53e3e">VOID</span>
+        {% endif %}
         {% if tx.parse_warnings %}
         <span class="import-warn-badge">⚠ {{ tx.parse_warnings|length }} warning{{ 's' if tx.parse_warnings|length != 1 }}</span>
         {% endif %}
+        <label class="import-include-label" onclick="event.stopPropagation()" style="margin-left:auto; font-size:0.8em; color:#666">
+          <input type="checkbox" name="tx_{{ i }}_void" value="1"
+                 {% if tx.void %}checked{% endif %} onclick="event.stopPropagation()"> Void
+        </label>
       </summary>
 
       {% if tx.parse_warnings %}
@@ -180,7 +188,7 @@
         </div>
         <div class="form-group">
           <label>Invoice Date</label>
-          <input type="date" name="tx_{{ i }}_check_date" value="{{ tx.check_date or '' }}">
+          <input type="date" min="2000-01-01" max="2099-12-31" name="tx_{{ i }}_check_date" value="{{ tx.check_date or '' }}">
         </div>
         <div class="form-group">
           <label>Invoice Amount</label>
@@ -200,7 +208,7 @@
         </div>
         <div class="form-group">
           <label>Payment Date</label>
-          <input type="date" name="tx_{{ i }}_received_date" value="{{ tx.payment.date or '' }}">
+          <input type="date" min="2000-01-01" max="2099-12-31" name="tx_{{ i }}_received_date" value="{{ tx.payment.date or '' }}">
         </div>
         <div class="form-group">
           <label>Payment Amount</label>
@@ -254,11 +262,11 @@
         </div>
         <div class="form-group">
           <label>Received Date</label>
-          <input type="date" name="tx_{{ i }}_received_date" value="{{ tx.received_date or '' }}">
+          <input type="date" min="2000-01-01" max="2099-12-31" name="tx_{{ i }}_received_date" value="{{ tx.received_date or '' }}">
         </div>
         <div class="form-group">
           <label>Check Date</label>
-          <input type="date" name="tx_{{ i }}_check_date" value="{{ tx.check_date or '' }}">
+          <input type="date" min="2000-01-01" max="2099-12-31" name="tx_{{ i }}_check_date" value="{{ tx.check_date or '' }}">
         </div>
         <div class="form-group">
           <label>Amount</label>
@@ -315,6 +323,8 @@
             <th class="col-money">Collected</th>
             <th class="col-money">Deferred</th>
             <th class="col-money">Recouped</th>
+            <th class="col-check" title="Client received funds">Client Rcvd</th>
+            <th class="col-check" title="Fee received by Waypoint">Fee Rcvd</th>
           </tr>
         </thead>
         <tbody>
@@ -334,12 +344,22 @@
                      list="vendor-list" class="input-md">
               <input type="hidden" name="tx_{{ i }}_disb_{{ j }}_vendor_id" value="">
             </td>
-            <td><input type="number" name="tx_{{ i }}_disb_{{ j }}_amount" value="{{ disb.amount }}" step="0.01" class="input-money"></td>
-            <td><input type="number" name="tx_{{ i }}_disb_{{ j }}_fee_pct" value="{{ disb.fee_pct or '' }}" step="0.01" class="input-pct" placeholder="—"></td>
-            <td><input type="number" name="tx_{{ i }}_disb_{{ j }}_fee_owed" value="{{ disb.fee_owed or '' }}" step="0.01" class="input-money"></td>
-            <td><input type="number" name="tx_{{ i }}_disb_{{ j }}_fee_collected" value="{{ disb.fee_collected or '' }}" step="0.01" class="input-money"></td>
-            <td><input type="number" name="tx_{{ i }}_disb_{{ j }}_fee_deferred" value="{{ disb.fee_deferred or '' }}" step="0.01" class="input-money"></td>
-            <td><input type="number" name="tx_{{ i }}_disb_{{ j }}_fee_recouped" value="{{ disb.fee_recouped or '' }}" step="0.01" class="input-money"></td>
+            <td><input type="number" name="tx_{{ i }}_disb_{{ j }}_amount" value="{{ disb.amount | round(2) }}" step="0.01" class="input-money"></td>
+            <td><input type="number" name="tx_{{ i }}_disb_{{ j }}_fee_pct" value="{{ disb.fee_pct | round(2) if disb.fee_pct else '' }}" step="0.01" class="input-pct" placeholder="—"></td>
+            <td><input type="number" name="tx_{{ i }}_disb_{{ j }}_fee_owed" value="{{ disb.fee_owed | round(2) if disb.fee_owed else '' }}" step="0.01" class="input-money"></td>
+            <td><input type="number" name="tx_{{ i }}_disb_{{ j }}_fee_collected" value="{{ disb.fee_collected | round(2) if disb.fee_collected else '' }}" step="0.01" class="input-money"></td>
+            <td><input type="number" name="tx_{{ i }}_disb_{{ j }}_fee_deferred" value="{{ disb.fee_deferred | round(2) if disb.fee_deferred else '' }}" step="0.01" class="input-money"></td>
+            <td><input type="number" name="tx_{{ i }}_disb_{{ j }}_fee_recouped" value="{{ disb.fee_recouped | round(2) if disb.fee_recouped else '' }}" step="0.01" class="input-money"></td>
+            <td class="col-check">
+              <input type="checkbox" name="tx_{{ i }}_disb_{{ j }}_client_received"
+                     {% if disb.client_received %}checked{% endif %}>
+            </td>
+            <td class="col-check">
+              {% if disb.fee_pct %}
+              <input type="checkbox" name="tx_{{ i }}_disb_{{ j }}_fee_received" value="1"
+                     {% if disb.fee_received %}checked{% endif %}>
+              {% endif %}
+            </td>
           </tr>
           {% endfor %}
         </tbody>
@@ -401,7 +421,7 @@
       {% set i = loop.index0 %}
       <tr {% if exp.parse_warnings %}class="import-row-warn"{% endif %}>
         <td class="col-check"><input type="checkbox" name="exp_{{ i }}_include" checked></td>
-        <td><input type="date" name="exp_{{ i }}_invoice_date" value="{{ exp.invoice_date or '' }}" class="input-date"></td>
+        <td><input type="date" min="2000-01-01" max="2099-12-31" name="exp_{{ i }}_invoice_date" value="{{ exp.invoice_date or '' }}" class="input-date"></td>
         <td><input type="text" name="exp_{{ i }}_payee_name" value="{{ exp.payee_name }}" class="input-sm"></td>
         <td><input type="number" name="exp_{{ i }}_invoice_amount" value="{{ exp.invoice_amount }}" step="0.01" class="input-money"></td>
         <td><input type="text" name="exp_{{ i }}_reason" value="{{ exp.reason }}" class="input-md"></td>
