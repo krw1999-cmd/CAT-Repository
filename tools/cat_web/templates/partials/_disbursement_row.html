@@ -34,7 +34,7 @@
     {% set collect_types = ['carrier', 'draw', 'escrow endorsed'] %}
     {% if (tx.type or '')|lower in collect_types %}
       {% set client_on = d.client_received %}
-      {% set fee_collectable = (d.fee_owed or 0) - (d.fee_deferred or 0) %}
+      {% set fee_collectable = (d.fee_owed or 0) - (d.fee_deferred or 0) + (d.fee_recouped or 0) %}
       {% set fee_on = fee_collectable > 0.005 and (d.fee_collected or 0) >= fee_collectable - 0.005 %}
       <button class="btn-toggle {{ 'btn-toggle-on' if client_on else '' }}"
               hx-post="{{ url_for('disbursement_toggle_client', claim_id=claim.id, tx_id=tx.id, did=d.id) }}"

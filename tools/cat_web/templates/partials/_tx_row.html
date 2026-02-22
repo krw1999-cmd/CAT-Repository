@@ -17,7 +17,7 @@
   {% set show_fee_owed      = tx.disburse_fee_owed %}
   {% set show_deferred      = tx.disburse_fee_deferred %}
   {% set show_recouped      = 0 if tx.has_linked_invoice else ([tx.disburse_fee_recouped or 0, tx.recouped or 0] | max) %}
-  {% set show_fee_collected = ((tx.disburse_fee_owed or 0) - (tx.disburse_fee_deferred or 0)) if tx.all_fee_rcvd else 0 %}
+  {% set show_fee_collected = ((tx.disburse_fee_owed or 0) - (tx.disburse_fee_deferred or 0) + (tx.disburse_fee_recouped or 0)) if tx.all_fee_rcvd else 0 %}
   {% set show_net_insured   = tx.net_to_insured %}
   {% set show_vendors       = tx.to_vendors %}
 {% else %}

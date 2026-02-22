@@ -927,7 +927,7 @@ def get_transaction_summary(claim_id: int) -> dict:
             # fee_collected: money goes out via Draw, Carrier, or Escrow Endorsed
             # Also include recouped fees (deferred fees taken back via check)
             if t_type in RELEASED_TYPES:
-                s["total_fee_collected"] += (t.get("disburse_fee_collected") or 0.0) + (t.get("disburse_fee_recouped") or 0.0)
+                s["total_fee_collected"] += t.get("disburse_fee_collected") or 0.0
             s["total_deferred"]      += t.get("disburse_fee_deferred") or 0.0
             # Use max of disbursement-level and transaction-level recouped: the latter is
             # auto-set by invoice payment side effects and may be non-zero even when
@@ -1206,6 +1206,22 @@ def delete_coverage(cov_id: int) -> None:
 
 def get_all_vendors() -> list[dict]:
     return _rows(get_db(), "SELECT * FROM vendors ORDER BY name")
+
+def ensure_vendor_by_name(name: str) -> int | None:
+    """Return vendor id matching name exactly; create a new vendor if not found."""
+    if not name or not name.strip():
+        return None
+    db = get_db()
+    row = _row(db, "SELECT id FROM vendors WHERE name = ?", (name.strip(),))
+    if row:
+        return row["id"]
+    cur = db.execute(
+        "INSERT INTO vendors (name, phone, email, notes, created_at) VALUES (?, '', '', '', ?)",
+        (name.strip(), _now()),
+    )
+    db.commit()
+    return cur.lastrowid
+
 
 def get_vendor(vendor_id: int) -> dict | None:
     row = _row(get_db(), "SELECT * FROM vendors WHERE id = ?", (vendor_id,))
@@ -2929,13 +2945,13 @@ def get_global_status() -> dict:
                (SELECT COUNT(*) FROM disbursements d
                 WHERE d.transaction_id = t.id
                   AND d.fee_applies = 1
-                  AND (d.fee_owed - COALESCE(d.fee_deferred, 0)) > 0.005
+                  AND (d.fee_owed - COALESCE(d.fee_deferred, 0) + COALESCE(d.fee_recouped, 0)) > 0.005
                ) AS fee_applicable_count,
                (SELECT COUNT(*) FROM disbursements d
                 WHERE d.transaction_id = t.id
                   AND d.fee_applies = 1
-                  AND (d.fee_owed - COALESCE(d.fee_deferred, 0)) > 0.005
-                  AND d.fee_collected < (d.fee_owed - COALESCE(d.fee_deferred, 0)) - 0.005
+                  AND (d.fee_owed - COALESCE(d.fee_deferred, 0) + COALESCE(d.fee_recouped, 0)) > 0.005
+                  AND d.fee_collected < (d.fee_owed - COALESCE(d.fee_deferred, 0) + COALESCE(d.fee_recouped, 0)) - 0.005
                ) AS fee_not_received_count
         FROM transactions t
         JOIN claims c ON c.id = t.claim_id
@@ -2946,8 +2962,8 @@ def get_global_status() -> dict:
                 SELECT 1 FROM disbursements d
                 WHERE d.transaction_id = t.id
                   AND d.fee_applies = 1
-                  AND (d.fee_owed - COALESCE(d.fee_deferred, 0)) > 0.005
-                  AND d.fee_collected < (d.fee_owed - COALESCE(d.fee_deferred, 0)) - 0.005
+                  AND (d.fee_owed - COALESCE(d.fee_deferred, 0) + COALESCE(d.fee_recouped, 0)) > 0.005
+                  AND d.fee_collected < (d.fee_owed - COALESCE(d.fee_deferred, 0) + COALESCE(d.fee_recouped, 0)) - 0.005
             )
             OR EXISTS (
                 SELECT 1 FROM disbursements d

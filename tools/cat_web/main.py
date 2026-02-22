@@ -1459,7 +1459,7 @@ def disbursement_toggle_fee(claim_id: int, tx_id: int, did: int):
     if not d:
         abort(404)
     data = dict(d)
-    fee_collectable = (d.get("fee_owed") or 0) - (d.get("fee_deferred") or 0)
+    fee_collectable = (d.get("fee_owed") or 0) - (d.get("fee_deferred") or 0) + (d.get("fee_recouped") or 0)
     already_collected = fee_collectable > 0 and (d.get("fee_collected") or 0) >= fee_collectable - 0.005
     data["fee_collected"] = 0 if already_collected else fee_collectable
     # leave fee_deferred unchanged
@@ -1530,15 +1530,14 @@ def _disburse_totals_oob(tx_id: int, claim: dict) -> str:
     return (
         f'<span id="disburse-total-disbursed" hx-swap-oob="true">${t["total_disbursed"]:,.2f}</span>'
         f'<span id="disburse-total-fee-owed" hx-swap-oob="true">${t["fee_owed"]:,.2f}</span>'
-        f'<span id="disburse-total-fee-coll" hx-swap-oob="true">${t["fee_collected"]:,.2f}</span>'
+        f'<span id="disburse-total-fee-coll" hx-swap-oob="true">${t["fee_collected"]:,.2f}</span>'  # fee_collected is set by toggle to fee_owed−deferred+recouped
         f'<span id="disburse-total-deferred" hx-swap-oob="true">${t["fee_deferred"]:,.2f}</span>'
         f'<span id="disburse-sidebar-net" hx-swap-oob="true">${t["net_to_insured"]:,.2f}</span>'
         f'<span id="disburse-sidebar-vendors" hx-swap-oob="true">${t["to_vendors"]:,.2f}</span>'
         f'<span id="disburse-sidebar-fee-owed" hx-swap-oob="true">${t["fee_owed"]:,.2f}</span>'
-        f'<span id="disburse-sidebar-fee-coll" hx-swap-oob="true">${t["fee_collected"]:,.2f}</span>'
+        f'<span id="disburse-sidebar-fee-coll" hx-swap-oob="true">${max(0.0, t["fee_owed"] - t["fee_deferred"] + t["fee_recouped"]):,.2f}</span>'
         f'<span id="disburse-sidebar-deferred" hx-swap-oob="true">${t["fee_deferred"]:,.2f}</span>'
         f'<span id="disburse-sidebar-recouped" hx-swap-oob="true">${t["fee_recouped"]:,.2f}</span>'
-        f'<span id="disburse-sidebar-fee-to-collect" hx-swap-oob="true">${max(0.0, t["fee_owed"] + t["fee_recouped"] - t["fee_deferred"]):,.2f}</span>'
         + pct_html
         + remaining_html
         + _split_totals_only_oob(tx_id)
@@ -2800,20 +2799,24 @@ def _do_import(form, parsed: dict) -> int:
             if not f.get(f"tx_{i}_disb_{j}_include"):
                 continue
             vendor_id = f.get(f"tx_{i}_disb_{j}_vendor_id") or None
+            recipient_name = f.get(f"tx_{i}_disb_{j}_recipient_name", "").strip()
+            if not vendor_id and f.get(f"tx_{i}_disb_{j}_recipient_type") == "vendor":
+                vendor_id = db_module.ensure_vendor_by_name(recipient_name)
             fee_pct_raw = db_module._fopt(f.get(f"tx_{i}_disb_{j}_fee_pct"))
             fee_owed_val  = db_module._f(f.get(f"tx_{i}_disb_{j}_fee_owed"))
             fee_defer_val = db_module._f(f.get(f"tx_{i}_disb_{j}_fee_deferred"))
             # Mirror the claim's "Fee Rcvd" toggle: set fee_collected = fee_owed - fee_deferred
             fee_received = bool(f.get(f"tx_{i}_disb_{j}_fee_received"))
+            fee_recoup_val = db_module._f(f.get(f"tx_{i}_disb_{j}_fee_recouped"))
             if fee_received and fee_pct_raw and fee_owed_val > 0:
-                fee_collected_val = round(max(0.0, fee_owed_val - fee_defer_val), 2)
+                fee_collected_val = round(max(0.0, fee_owed_val - fee_defer_val + fee_recoup_val), 2)
             else:
                 fee_collected_val = 0.0
             db_module.create_disbursement(tx_id, {
                 "sort_order":     j,
                 "recipient_type": f.get(f"tx_{i}_disb_{j}_recipient_type", "insured"),
                 "vendor_id":      vendor_id,
-                "recipient_name": f.get(f"tx_{i}_disb_{j}_recipient_name", "").strip(),
+                "recipient_name": recipient_name,
                 "amount":         db_module._f(f.get(f"tx_{i}_disb_{j}_amount")),
                 "fee_applies":    bool(fee_pct_raw),
                 "fee_pct":        fee_pct_raw,
@@ -2830,10 +2833,11 @@ def _do_import(form, parsed: dict) -> int:
     for i in range(exp_count):
         if not f.get(f"exp_{i}_include"):
             continue
+        exp_payee = f.get(f"exp_{i}_payee_name", "").strip()
         exp_id = db_module.create_expense(claim_id, {
             "invoice_date":      f.get(f"exp_{i}_invoice_date", "").strip(),
-            "payee_name":        f.get(f"exp_{i}_payee_name", "").strip(),
-            "vendor_id":         None,
+            "payee_name":        exp_payee,
+            "vendor_id":         db_module.ensure_vendor_by_name(exp_payee),
             "invoice_amount":    db_module._f(f.get(f"exp_{i}_invoice_amount")),
             "responsible_party": f.get(f"exp_{i}_responsible_party", "").strip(),
             "unpaid_to_payee":   0.0,

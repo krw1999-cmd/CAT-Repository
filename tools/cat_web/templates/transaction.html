@@ -308,10 +308,14 @@
         <span id="disburse-sidebar-fee-owed">{{ disburse_totals.fee_owed | money }}</span>
       </div>
 
-      <div class="sidebar-label">Fee Collected</div>
-      <div class="sidebar-value {% if disburse_totals.fee_collected > 0 %}text-green{% endif %}">
-        <span id="disburse-sidebar-fee-coll">{{ disburse_totals.fee_collected | money }}</span>
+      {% if disburse_totals.fee_recouped > 0 %}
+      <div class="sidebar-label">Recouped</div>
+      <div class="sidebar-value">
+        <span id="disburse-sidebar-recouped">{{ disburse_totals.fee_recouped | money }}</span>
       </div>
+      {% else %}
+      <span id="disburse-sidebar-recouped" style="display:none">$0.00</span>
+      {% endif %}
 
       {% if disburse_totals.fee_deferred > 0 %}
       <div class="sidebar-label">Deferred</div>
@@ -322,20 +326,11 @@
       <span id="disburse-sidebar-deferred" style="display:none">$0.00</span>
       {% endif %}
 
-      {% if disburse_totals.fee_recouped > 0 %}
-      <div class="sidebar-label">Recouped</div>
-      <div class="sidebar-value">
-        <span id="disburse-sidebar-recouped">{{ disburse_totals.fee_recouped | money }}</span>
+      <div class="sidebar-label">To Collect</div>
+      <div class="sidebar-value highlight">
+        <span id="disburse-sidebar-fee-coll">{{ ((disburse_totals.fee_owed or 0) - (disburse_totals.fee_deferred or 0) + (disburse_totals.fee_recouped or 0)) | money }}</span>
       </div>
-      {% else %}
-      <span id="disburse-sidebar-recouped" style="display:none">$0.00</span>
-      {% endif %}
 
-      {% set fee_to_collect = (disburse_totals.fee_owed or 0) + (disburse_totals.fee_recouped or 0) - (disburse_totals.fee_deferred or 0) %}
-      <div class="sidebar-label" style="margin-top:6px;font-weight:700">To Collect</div>
-      <div class="sidebar-value highlight" style="font-weight:700">
-        <span id="disburse-sidebar-fee-to-collect">{{ fee_to_collect | money }}</span>
-      </div>
 
     {% endif %}
     </div>
