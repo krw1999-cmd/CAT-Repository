@@ -137,13 +137,69 @@
     {% include "partials/_disbursements_section.html" %}
     {% endif %}
 
+    {# ── Linked Deferred Check (recouped checks only) ─────────────────────── #}
+    {% if (disburse_totals.fee_recouped or 0) > 0 and (tx.type or '')|lower != 'fee invoice' %}
+    {% set _linked_deferred = recouped_links | sum(attribute='deferred') %}
+    {% set _recouped_amt = (disburse_totals.fee_recouped or 0) %}
+    {% set _linked_pct = ((_linked_deferred / _recouped_amt) * 100) if _recouped_amt > 0 else 0 %}
+    <section class="section">
+      <div class="section-header">
+        <h3>Linked Deferred Check</h3>
+        <span class="text-muted text-small">
+          Linked: <strong>{{ _linked_deferred | money }}</strong>
+          &nbsp;/&nbsp;
+          Recouped: <strong>{{ _recouped_amt | money }}</strong>
+          &nbsp;
+          <span class="status-badge {% if _linked_pct >= 99.9 %}status-released{% elif _linked_pct > 0 %}status-fee-pending{% else %}status-client-pending{% endif %}">
+            {{ '%.0f' | format(_linked_pct) }}% covered
+          </span>
+        </span>
+      </div>
+      <div class="table-wrap">
+        <table class="table table-compact">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Type</th>
+              <th>Date</th>
+              <th class="num">Check Amt</th>
+              <th class="num">Deferred</th>
+              <th class="actions-col"></th>
+            </tr>
+          </thead>
+          <tbody id="recouped-links-body">
+            {% for link in recouped_links %}
+              {% include "partials/_recouped_link_row.html" %}
+            {% endfor %}
+            <tr id="recouped-link-new-row-placeholder"></tr>
+          </tbody>
+        </table>
+      </div>
+      <button class="btn btn-ghost btn-sm"
+              hx-get="{{ url_for('recouped_link_new_row', claim_id=claim.id, tx_id=tx.id) }}"
+              hx-target="#recouped-link-new-row-placeholder"
+              hx-swap="outerHTML">
+        + Link Deferred Check
+      </button>
+    </section>
+    {% endif %}
+
     {# ── Linked Deferred Fees (Fee Invoice only) ─────────────────────────── #}
     {% if (tx.type or '')|lower == 'fee invoice' %}
+    {% set _inv_linked = invoice_deferred_links | sum(attribute='deferred') %}
+    {% set _inv_amt = (tx.amount or 0) %}
+    {% set _inv_linked_pct = ((_inv_linked / _inv_amt) * 100) if _inv_amt > 0 else 0 %}
     <section class="section">
       <div class="section-header">
         <h3>Linked Deferred Fees</h3>
         <span class="text-muted text-small">
-          Total deferred: <strong>{{ invoice_deferred_links|sum(attribute='deferred') | money }}</strong>
+          Linked: <strong>{{ _inv_linked | money }}</strong>
+          &nbsp;/&nbsp;
+          Recouped: <strong>{{ _inv_amt | money }}</strong>
+          &nbsp;
+          <span class="status-badge {% if _inv_linked_pct >= 99.9 %}status-released{% elif _inv_linked_pct > 0 %}status-fee-pending{% else %}status-client-pending{% endif %}">
+            {{ '%.0f' | format(_inv_linked_pct) }}% covered
+          </span>
         </span>
       </div>
       <div class="table-wrap">

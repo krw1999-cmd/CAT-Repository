@@ -1,0 +1,8 @@
+<div id="run-header-display">
+  <p class="text-small text-muted">
+    Saved: <strong>{{ run.name }}</strong>
+    {% if run.period_from or run.period_to %}· {{ run.period_from or '?' }} – {{ run.period_to or '?' }}{% endif %}
+    {% if run.pay_date %}· Pay Date: {{ run.pay_date }}{% endif %}
+    · Status: {{ run.status | capitalize }}
+  </p>
+</div>

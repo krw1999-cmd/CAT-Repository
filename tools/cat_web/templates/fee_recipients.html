@@ -15,6 +15,7 @@
       <thead>
         <tr>
           <th>Name</th>
+          <th>Company / DBA</th>
           <th>Default Role</th>
           <th class="actions-col"></th>
         </tr>
@@ -22,18 +23,49 @@
       <tbody>
         {% for r in recipients %}
         <tr id="recipient-{{ r.id }}">
-          <td><strong>{{ r.name }}</strong></td>
-          <td class="capitalize text-small">{{ r.default_role or '—' }}</td>
+          <td>
+            <form id="fr-form-{{ r.id }}" style="display:none"
+                  hx-put="{{ url_for('fee_recipient_update', rid=r.id) }}"
+                  hx-target="#recipients-section"
+                  hx-swap="outerHTML"
+                  hx-select="#recipients-section">
+              <input type="text" name="name" value="{{ r.name }}" class="input-sm" required style="width:130px">
+            </form>
+            <span class="fr-view-{{ r.id }}"><strong>{{ r.name }}</strong></span>
+          </td>
+          <td>
+            <input type="text" form="fr-form-{{ r.id }}" name="company_name"
+                   value="{{ r.company_name or '' }}" class="input-sm fr-edit-{{ r.id }}"
+                   style="display:none;width:150px" placeholder="Company / DBA">
+            <span class="fr-view-{{ r.id }} text-small text-muted">{{ r.company_name or '—' }}</span>
+          </td>
+          <td>
+            <select form="fr-form-{{ r.id }}" name="default_role"
+                    class="select-sm fr-edit-{{ r.id }}" style="display:none">
+              <option value="">— none —</option>
+              {% for role in roles %}
+              <option value="{{ role }}" {% if role == r.default_role %}selected{% endif %}>{{ role|capitalize }}</option>
+              {% endfor %}
+            </select>
+            <span class="fr-view-{{ r.id }} capitalize text-small">{{ r.default_role or '—' }}</span>
+          </td>
           <td class="actions-col nowrap">
-            <button class="btn-icon btn-icon-danger"
+            <button class="btn-icon fr-view-{{ r.id }}"
+                    onclick="frStartEdit({{ r.id }})" title="Edit">✎</button>
+            <button class="btn-icon btn-icon-danger fr-view-{{ r.id }}"
                     hx-delete="{{ url_for('fee_recipient_delete', rid=r.id) }}"
                     hx-target="#recipients-section"
                     hx-swap="outerHTML"
+                    hx-select="#recipients-section"
                     hx-confirm="Remove '{{ r.name }}'?">✕</button>
+            <button class="btn-icon fr-edit-{{ r.id }}" style="display:none"
+                    onclick="frSubmitEdit({{ r.id }})" title="Save">✓</button>
+            <button class="btn-icon fr-edit-{{ r.id }}" style="display:none"
+                    onclick="frCancelEdit({{ r.id }})" title="Cancel">✕</button>
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="3" class="text-center text-muted" style="padding:20px">No fee recipients yet.</td></tr>
+        <tr><td colspan="4" class="text-center text-muted" style="padding:20px">No fee recipients yet.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -44,11 +76,16 @@
   <div class="section-header"><h3>Add Fee Recipient</h3></div>
   <form hx-post="{{ url_for('fee_recipient_create') }}"
         hx-target="#recipients-section"
-        hx-swap="outerHTML">
-    <div class="form-grid-2" style="max-width:400px">
+        hx-swap="outerHTML"
+        hx-select="#recipients-section">
+    <div class="form-grid-2" style="max-width:520px">
       <div class="field">
         <label>Name *</label>
         <input type="text" name="name" class="input-sm" required placeholder="Full name">
+      </div>
+      <div class="field">
+        <label>Company / DBA</label>
+        <input type="text" name="company_name" class="input-sm" placeholder="Company name (for print headers)">
       </div>
       <div class="field">
         <label>Default Role</label>
@@ -63,4 +100,20 @@
     <button type="submit" class="btn btn-primary btn-sm">Add Recipient</button>
   </form>
 </section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function frStartEdit(id) {
+  document.querySelectorAll('.fr-view-' + id).forEach(el => el.style.display = 'none');
+  document.querySelectorAll('.fr-edit-' + id).forEach(el => el.style.display = '');
+}
+function frCancelEdit(id) {
+  document.querySelectorAll('.fr-view-' + id).forEach(el => el.style.display = '');
+  document.querySelectorAll('.fr-edit-' + id).forEach(el => el.style.display = 'none');
+}
+function frSubmitEdit(id) {
+  htmx.trigger(document.getElementById('fr-form-' + id), 'submit');
+}
+</script>
 {% endblock %}

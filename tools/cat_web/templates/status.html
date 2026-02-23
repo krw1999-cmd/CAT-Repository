@@ -4,7 +4,21 @@
 {% block content %}
 <div class="page-header">
   <h2>Global Status</h2>
+  <a id="export-btn" href="{{ url_for('status_export') }}"
+     class="btn btn-ghost btn-sm">⬇ Export CSV</a>
 </div>
+
+{% if all_adjusters %}
+<div style="display:flex; align-items:center; gap:8px; margin-bottom:20px">
+  <label class="text-muted text-small">Adjuster:</label>
+  <select id="filter-adjuster" class="input-sm select-sm" onchange="applyAdjusterFilter()">
+    <option value="">All</option>
+    {% for name in all_adjusters %}
+    <option value="{{ name }}">{{ name }}</option>
+    {% endfor %}
+  </select>
+</div>
+{% endif %}
 
 {# ── 1. Pending Checks ────────────────────────────────────────────────────── #}
 <section class="section" style="margin-bottom:32px">
@@ -32,7 +46,7 @@
     </thead>
     <tbody>
       {% for ck in pending_checks %}
-      <tr>
+      <tr data-adjuster="{{ claim_adjusters.get(ck.claim_id, [])|join('|') }}">
         <td>{{ ck.insured_name }}</td>
         <td>{{ ck.job_number or '—' }}</td>
         <td>{{ ck.sequence_number or '—' }}</td>
@@ -73,7 +87,52 @@
   {% endif %}
 </section>
 
-{# ── 2. Open Escrow ───────────────────────────────────────────────────────── #}
+{# ── 2. Pending Fee Invoices ───────────────────────────────────────────────── #}
+<section class="section" style="margin-bottom:32px">
+  <h3 style="margin-bottom:12px">
+    Pending Fee Invoices
+    {% if pending_fee_invoices %}
+    <span class="badge badge-unpaid-inv">{{ pending_fee_invoices|length }}</span>
+    {% endif %}
+  </h3>
+  {% if pending_fee_invoices %}
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Insured</th>
+        <th>Job #</th>
+        <th>Invoice #</th>
+        <th>Date</th>
+        <th class="num-col">Invoice Amt</th>
+        <th class="num-col">Collected</th>
+        <th class="num-col">Balance Due</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for inv in pending_fee_invoices %}
+      <tr data-adjuster="{{ claim_adjusters.get(inv.claim_id, [])|join('|') }}">
+        <td>{{ inv.insured_name }}</td>
+        <td>{{ inv.job_number or '—' }}</td>
+        <td>{{ inv.invoice_number or '—' }}</td>
+        <td>{{ inv.date or '—' }}</td>
+        <td class="num-col">{{ inv.amount | money }}</td>
+        <td class="num-col">{{ inv.total_collected | money }}</td>
+        <td class="num-col"><strong>{{ inv.balance_due | money }}</strong></td>
+        <td>
+          <a href="{{ url_for('tx_detail', claim_id=inv.claim_id, tx_id=inv.tx_id) }}"
+             class="btn btn-ghost btn-sm">View →</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="text-muted">No pending fee invoices — all invoices fully collected.</p>
+  {% endif %}
+</section>
+
+{# ── 3. Open Escrow ───────────────────────────────────────────────────────── #}
 <section class="section" style="margin-bottom:32px">
   <h3 style="margin-bottom:12px">
     Money in Escrow
@@ -97,7 +156,7 @@
     </thead>
     <tbody>
       {% for row in open_escrow %}
-      <tr>
+      <tr data-adjuster="{{ claim_adjusters.get(row.claim_id, [])|join('|') }}">
         <td>{{ row.insured_name }}</td>
         <td>{{ row.job_number or '—' }}</td>
         <td>{{ row.claim_number or '—' }}</td>
@@ -122,7 +181,7 @@
   {% endif %}
 </section>
 
-{# ── 3. Unrecouped Deferred Fees ──────────────────────────────────────────── #}
+{# ── 4. Unrecouped Deferred Fees ──────────────────────────────────────────── #}
 <section class="section" style="margin-bottom:32px">
   <h3 style="margin-bottom:12px">
     Unrecouped Deferred Fees
@@ -145,7 +204,7 @@
     </thead>
     <tbody>
       {% for row in unrecouped_deferred %}
-      <tr>
+      <tr data-adjuster="{{ claim_adjusters.get(row.claim_id, [])|join('|') }}">
         <td>{{ row.insured_name }}</td>
         <td>{{ row.job_number or '—' }}</td>
         <td>{{ row.claim_number or '—' }}</td>
@@ -165,7 +224,7 @@
   {% endif %}
 </section>
 
-{# ── 4. Pending Expenses ───────────────────────────────────────────────────── #}
+{# ── 5. Pending Expenses ───────────────────────────────────────────────────── #}
 <section class="section">
   <h3 style="margin-bottom:12px">
     Pending Expenses
@@ -191,7 +250,7 @@
     </thead>
     <tbody>
       {% for exp in pending_expenses %}
-      <tr>
+      <tr data-adjuster="{{ claim_adjusters.get(exp.claim_id, [])|join('|') }}">
         <td>{{ exp.insured_name }}</td>
         <td style="white-space:nowrap">{{ exp.job_number or '—' }}</td>
         <td style="white-space:nowrap">{{ exp.invoice_date or '—' }}</td>
@@ -201,13 +260,13 @@
         <td class="num-col">{{ exp.invoice_amount | money }}</td>
         <td style="white-space:nowrap">
           {% if exp.outstanding > 0.005 %}
-          <span class="badge badge-unpaid-inv">Payee {{ exp.outstanding | money }}</span>
+          <span class="badge-expense-payee">Payee {{ exp.outstanding | money }}</span>
           {% endif %}
           {% if exp.reimburse_owed > 0.005 %}
-          <span class="badge badge-unpaid-inv">Client→WP {{ exp.reimburse_owed | money }}</span>
+          <span class="badge-expense-reimburse">Client→WP {{ exp.reimburse_owed | money }}</span>
           {% endif %}
           {% if exp.wp_reimburse_owed > 0.005 %}
-          <span class="badge badge-unpaid-inv">WP→Client {{ exp.wp_reimburse_owed | money }}</span>
+          <span class="badge-expense-wp-reimburse">WP→Client {{ exp.wp_reimburse_owed | money }}</span>
           {% endif %}
         </td>
         <td>
@@ -228,4 +287,22 @@
   {% endif %}
 </section>
 
+<script>
+function applyAdjusterFilter() {
+  const adjuster = document.getElementById('filter-adjuster').value;
+  document.querySelectorAll('tr[data-adjuster]').forEach(row => {
+    if (!adjuster) {
+      row.style.display = '';
+    } else {
+      const names = row.dataset.adjuster.split('|').map(s => s.trim());
+      row.style.display = names.includes(adjuster) ? '' : 'none';
+    }
+  });
+  const btn = document.getElementById('export-btn');
+  if (btn) {
+    const base = '{{ url_for("status_export") }}';
+    btn.href = adjuster ? base + '?adjuster=' + encodeURIComponent(adjuster) : base;
+  }
+}
+</script>
 {% endblock %}

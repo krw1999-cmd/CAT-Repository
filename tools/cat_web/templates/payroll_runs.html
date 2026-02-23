@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Payroll Runs{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display:flex;align-items:center;gap:16px">
+  <h2>Payroll Runs</h2>
+  <a href="{{ url_for('payroll_run_new_form') }}" class="btn btn-primary btn-sm">+ New Run</a>
+</div>
+
+{% if show_new_form %}
+<section class="section">
+  <div class="section-header"><h3>New Payroll Run</h3></div>
+  <form action="{{ url_for('payroll_run_create') }}" method="post" style="max-width:520px">
+    <div class="form-grid-2">
+      <div class="field" style="grid-column:1/-1">
+        <label>Run Name *</label>
+        <input type="text" name="name" class="input-sm" required placeholder="e.g. January 2026 Payroll" style="width:100%">
+      </div>
+      <div class="field">
+        <label>Period From</label>
+        <input type="date" name="period_from" class="input-sm">
+      </div>
+      <div class="field">
+        <label>Period To</label>
+        <input type="date" name="period_to" class="input-sm">
+      </div>
+      <div class="field">
+        <label>Expected Pay Date</label>
+        <input type="date" name="pay_date" class="input-sm">
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button type="submit" class="btn btn-primary btn-sm">Create Run</button>
+      <a href="{{ url_for('payroll_runs_list') }}" class="btn btn-ghost btn-sm">Cancel</a>
+    </div>
+  </form>
+</section>
+{% endif %}
+
+<section class="section" id="runs-section">
+  {% if runs %}
+  <div class="table-wrap">
+    <table class="table table-compact">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Period</th>
+          <th>Pay Date</th>
+          <th>Status</th>
+          <th class="text-right"># Splits</th>
+          <th class="text-right"># Exp</th>
+          <th class="actions-col"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for run in runs %}
+        <tr>
+          <td><a href="{{ url_for('payroll_run_builder', run_id=run.id) }}"><strong>{{ run.name }}</strong></a></td>
+          <td class="text-small text-muted">
+            {% if run.period_from or run.period_to %}
+              {{ run.period_from or '?' }} – {{ run.period_to or '?' }}
+            {% else %}—{% endif %}
+          </td>
+          <td class="text-small">{{ run.pay_date or '—' }}</td>
+          <td>
+            {% if run.status == 'paid' %}
+              <span class="status-badge status-released">Paid</span>
+            {% elif run.status == 'submitted' %}
+              <span class="status-badge status-inv-pending">Submitted</span>
+            {% else %}
+              <span class="status-badge status-pending">Draft</span>
+            {% endif %}
+          </td>
+          <td class="text-right text-small">{{ run.split_count }}</td>
+          <td class="text-right text-small">{{ run.exp_split_count }}</td>
+          <td class="actions-col nowrap">
+            <a href="{{ url_for('payroll_run_builder', run_id=run.id) }}" class="btn-icon" title="Open">→</a>
+            {% if run.status == 'draft' %}
+            <button class="btn-icon btn-icon-danger"
+                    hx-delete="{{ url_for('payroll_run_delete', run_id=run.id) }}"
+                    hx-target="#runs-section"
+                    hx-swap="outerHTML"
+                    hx-select="#runs-section"
+                    hx-confirm="Delete run '{{ run.name }}'? This cannot be undone.">✕</button>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="text-muted" style="padding:24px 0">No payroll runs yet. Create one above.</p>
+  {% endif %}
+</section>
+{% endblock %}

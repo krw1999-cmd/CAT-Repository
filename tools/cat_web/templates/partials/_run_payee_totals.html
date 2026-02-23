@@ -1,0 +1,18 @@
+<div id="payee-totals-{{ payee.fee_recipient_id }}"
+     style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:12px">
+  <h3 style="margin:0">{{ payee.name }}</h3>
+  {% if payee.salary_amount %}
+  <span class="text-small text-muted">Salary: {{ payee.salary_amount | money }}</span>
+  {% endif %}
+  <span class="text-small">
+    Fees: <strong>{{ payee.selected_tx_total | money }}</strong>
+  </span>
+  {% if payee.selected_exp_total %}
+  <span class="text-small">
+    Expenses: <strong>{{ payee.selected_exp_total | money }}</strong>
+  </span>
+  {% endif %}
+  <span class="text-small">
+    Total: <strong>{{ (payee.selected_tx_total + payee.selected_exp_total + payee.salary_amount) | money }}</strong>
+  </span>
+</div>

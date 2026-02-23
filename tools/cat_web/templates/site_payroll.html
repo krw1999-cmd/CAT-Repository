@@ -63,9 +63,6 @@
       <div class="payroll-card-name">{{ payee.name or '(unnamed)' }}</div>
       <div class="payroll-card-summary">
         <span>Fees: Earned <strong>{{ payee.total_earned | money }}</strong> | Paid <strong>{{ payee.total_paid | money }}</strong> | Remaining <strong {% if fee_remaining > 0.005 %}style="color:var(--red)"{% endif %}>{{ fee_remaining | money }}</strong></span>
-        {% if payee.total_deferred > 0 %}
-        <span style="margin-left:16px">Pending: <strong>{{ payee.total_deferred | money }}</strong></span>
-        {% endif %}
         {% if payee.exp_rows %}
         <span style="margin-left:16px">Expenses: Owed <strong>{{ payee.total_exp_owed | money }}</strong> | Paid back <strong>{{ payee.total_exp_paid | money }}</strong> | Outstanding <strong {% if exp_outstanding > 0.005 %}style="color:var(--red)"{% endif %}>{{ exp_outstanding | money }}</strong></span>
         {% endif %}
@@ -99,7 +96,7 @@
                 data-status="{{ row.status }}"
                 data-claim="{{ row.job_number }} {{ row.insured_name }}">
               <td>
-                {% if row.status != 'paid' %}
+                {% if row.status != 'paid' and row.split_id %}
                 <input type="checkbox" name="split_ids[]" value="{{ row.split_id }}" class="row-check">
                 {% endif %}
               </td>
@@ -112,26 +109,28 @@
               <td class="num">{{ "%.2f"|format(row.split_pct or 0) }}%</td>
               <td class="num"><strong>{{ row.earned | money }}</strong></td>
               <td>
+                {% if row.split_id %}
                 <span id="split-status-{{ row.split_id }}">
-                  {% if row.status == 'paid' %}
-                  <button type="button" class="status-badge status-released payroll-unmark-btn"
+                  {% if row.status in ('paid', 'partial') %}
+                  {% set badge_cls = 'status-released' if row.status == 'paid' else 'status-inv-pending' %}
+                  {% set badge_txt = ('✓ Paid' ~ (' ' ~ row.payroll_paid_date if row.payroll_paid_date else '')) if row.status == 'paid' else 'Partial ' ~ (row.payroll_paid | money) %}
+                  <button type="button" class="status-badge {{ badge_cls }} payroll-unmark-btn"
                           hx-post="{{ url_for('site_split_toggle_paid', sid=row.split_id) }}"
                           hx-vals='{"paid_date": ""}'
                           hx-target="#split-status-{{ row.split_id }}"
                           hx-swap="outerHTML"
-                          title="Click to unmark paid">✓</button>
-                  <span class="payroll-date-display">{{ row.payroll_paid_date or '—' }}</span>
-                  <button type="button" class="btn-icon payroll-edit-date-btn"
-                          onclick="payrollStartEditDate(this)" title="Edit date">✎</button>
-                  <span class="payroll-date-editor" style="display:none">
+                          title="Click to unmark paid">{{ badge_txt }}</button>
+                  <button type="button" class="btn-icon payroll-edit-btn"
+                          onclick="payrollStartEdit(this)" title="Edit amount & date">✎</button>
+                  <span class="payroll-editor" style="display:none">
+                    <input type="number" step="0.01" min="0" value="{{ '%.2f' | format(row.payroll_paid or 0) }}"
+                           name="amount" class="input-sm" style="width:160px">
                     <input type="date" min="2000-01-01" max="2099-12-31" name="paid_date" value="{{ row.payroll_paid_date or '' }}" class="input-sm payroll-date-edit">
                     <button type="button" class="btn btn-primary btn-sm"
-                            onclick="payrollSaveDate(this,'{{ url_for('site_split_set_date', sid=row.split_id) }}','#split-status-{{ row.split_id }}')">Save</button>
+                            onclick="payrollSaveEdit(this,'{{ url_for('site_split_set_paid', sid=row.split_id) }}','#split-status-{{ row.split_id }}')">Save</button>
                     <button type="button" class="btn btn-ghost btn-sm"
-                            onclick="payrollCancelDate(this)">Cancel</button>
+                            onclick="payrollCancelEdit(this)">Cancel</button>
                   </span>
-                  {% elif row.status == 'partial' %}
-                  <span class="status-badge status-inv-pending">Partial {{ row.payroll_paid | money }}</span>
                   {% else %}
                   <button type="button" class="btn-icon"
                           hx-post="{{ url_for('site_split_toggle_paid', sid=row.split_id) }}"
@@ -141,6 +140,9 @@
                           title="Mark paid">✓</button>
                   {% endif %}
                 </span>
+                {% else %}
+                <span class="text-muted">—</span>
+                {% endif %}
               </td>
             </tr>
             {% endfor %}
@@ -179,7 +181,13 @@
                 data-claim="{{ row.job_number }} {{ row.insured_name }}">
               <td><a href="{{ url_for('claim_detail', claim_id=row.claim_id) }}" class="text-muted">{{ row.job_number or '—' }}</a></td>
               <td>{{ row.insured_name or '—' }}</td>
-              <td><a href="{{ url_for('tx_detail', claim_id=row.claim_id, tx_id=row.tx_id) }}" class="text-muted">{{ row.check_number or '—' }}</a></td>
+              <td>
+                {% if row.tx_id %}
+                <a href="{{ url_for('tx_detail', claim_id=row.claim_id, tx_id=row.tx_id) }}" class="text-muted">{{ row.invoice_number or row.check_number or '—' }}</a>
+                {% else %}
+                <span class="text-muted">{{ row.check_number or '—' }}</span>
+                {% endif %}
+              </td>
               <td>{{ row.date or '—' }}</td>
               <td>{{ row.type }}</td>
               <td class="capitalize">{{ row.role }}</td>
@@ -188,11 +196,8 @@
               <td>
                 {% if row.pending_type == 'not_received' %}
                 <span class="status-badge status-inv-pending">Fee not received</span>
-                {% elif row.invoice_info %}
-                <span class="status-badge status-inv-pending" title="Invoice outstanding">
-                  Deferred — #{{ row.invoice_info.invoice_number }}
-                  ({{ row.invoice_info.outstanding | money }} {{ row.invoice_info.status }})
-                </span>
+                {% elif row.pending_type == 'fee_invoice' %}
+                <span class="status-badge status-inv-pending">Invoice unpaid</span>
                 {% else %}
                 <span class="text-muted">Deferred</span>
                 {% endif %}
@@ -243,25 +248,26 @@
               <td class="num"><strong>{{ row.owed | money }}</strong></td>
               <td>
                 <span id="exp-split-status-{{ row.exp_split_id }}">
-                  {% if row.status == 'paid' %}
-                  <button type="button" class="status-badge status-released payroll-unmark-btn"
+                  {% if row.status in ('paid', 'partial') %}
+                  {% set badge_cls = 'status-released' if row.status == 'paid' else 'status-inv-pending' %}
+                  {% set badge_txt = ('✓ Paid' ~ (' ' ~ row.payroll_paid_date if row.payroll_paid_date else '')) if row.status == 'paid' else 'Partial ' ~ (row.payroll_paid | money) %}
+                  <button type="button" class="status-badge {{ badge_cls }} payroll-unmark-btn"
                           hx-post="{{ url_for('site_expense_split_toggle_paid', sid=row.exp_split_id) }}"
                           hx-vals='{"paid_date": ""}'
                           hx-target="#exp-split-status-{{ row.exp_split_id }}"
                           hx-swap="outerHTML"
-                          title="Click to unmark paid">✓</button>
-                  <span class="payroll-date-display">{{ row.payroll_paid_date or '—' }}</span>
-                  <button type="button" class="btn-icon payroll-edit-date-btn"
-                          onclick="payrollStartEditDate(this)" title="Edit date">✎</button>
-                  <span class="payroll-date-editor" style="display:none">
+                          title="Click to unmark paid">{{ badge_txt }}</button>
+                  <button type="button" class="btn-icon payroll-edit-btn"
+                          onclick="payrollStartEdit(this)" title="Edit amount & date">✎</button>
+                  <span class="payroll-editor" style="display:none">
+                    <input type="number" step="0.01" min="0" value="{{ '%.2f' | format(row.payroll_paid or 0) }}"
+                           name="amount" class="input-sm" style="width:160px">
                     <input type="date" min="2000-01-01" max="2099-12-31" name="paid_date" value="{{ row.payroll_paid_date or '' }}" class="input-sm payroll-date-edit">
                     <button type="button" class="btn btn-primary btn-sm"
-                            onclick="payrollSaveDate(this,'{{ url_for('site_expense_split_set_date', sid=row.exp_split_id) }}','#exp-split-status-{{ row.exp_split_id }}')">Save</button>
+                            onclick="payrollSaveEdit(this,'{{ url_for('site_expense_split_set_paid', sid=row.exp_split_id) }}','#exp-split-status-{{ row.exp_split_id }}')">Save</button>
                     <button type="button" class="btn btn-ghost btn-sm"
-                            onclick="payrollCancelDate(this)">Cancel</button>
+                            onclick="payrollCancelEdit(this)">Cancel</button>
                   </span>
-                  {% elif row.status == 'partial' %}
-                  <span class="status-badge status-inv-pending">Partial {{ row.payroll_paid | money }}</span>
                   {% else %}
                   <button type="button" class="btn-icon"
                           hx-post="{{ url_for('site_expense_split_toggle_paid', sid=row.exp_split_id) }}"
@@ -340,20 +346,14 @@ button.payroll-unmark-btn {
   opacity: 0.85;
 }
 button.payroll-unmark-btn:hover { opacity: 1; text-decoration: line-through; }
-.payroll-date-display {
-  font-size: 12px;
-  color: var(--text);
-  margin-left: 6px;
-  vertical-align: middle;
-}
-.payroll-edit-date-btn {
+.payroll-edit-btn {
   font-size: 11px;
   opacity: 0.4;
-  margin-left: 2px;
+  margin-left: 4px;
   vertical-align: middle;
 }
-.payroll-edit-date-btn:hover { opacity: 1; }
-.payroll-date-editor {
+.payroll-edit-btn:hover { opacity: 1; }
+.payroll-editor {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -361,7 +361,7 @@ button.payroll-unmark-btn:hover { opacity: 1; text-decoration: line-through; }
   vertical-align: middle;
 }
 .payroll-date-edit {
-  width: 120px;
+  width: 100px;
   font-size: 11px;
   padding: 2px 4px;
   height: auto;
@@ -377,22 +377,21 @@ button.payroll-unmark-btn:hover { opacity: 1; text-decoration: line-through; }
 </style>
 
 <script>
-function payrollStartEditDate(btn) {
+function payrollStartEdit(btn) {
   const cell = btn.closest('span[id]');
-  cell.querySelector('.payroll-date-display').style.display = 'none';
   btn.style.display = 'none';
-  cell.querySelector('.payroll-date-editor').style.display = '';
+  cell.querySelector('.payroll-editor').style.display = '';
 }
-function payrollCancelDate(btn) {
+function payrollCancelEdit(btn) {
   const cell = btn.closest('span[id]');
-  cell.querySelector('.payroll-date-editor').style.display = 'none';
-  cell.querySelector('.payroll-date-display').style.display = '';
-  cell.querySelector('.payroll-edit-date-btn').style.display = '';
+  cell.querySelector('.payroll-editor').style.display = 'none';
+  cell.querySelector('.payroll-edit-btn').style.display = '';
 }
-function payrollSaveDate(btn, url, target) {
+function payrollSaveEdit(btn, url, target) {
   const cell = btn.closest('span[id]');
-  const input = cell.querySelector('input[name="paid_date"]');
-  htmx.ajax('POST', url, {target: target, swap: 'outerHTML', values: {paid_date: input.value}});
+  const amount = cell.querySelector('input[name="amount"]').value;
+  const paidDate = cell.querySelector('input[name="paid_date"]').value;
+  htmx.ajax('POST', url, {target: target, swap: 'outerHTML', values: {amount: amount, paid_date: paidDate}});
 }
 
 function applyFilters() {

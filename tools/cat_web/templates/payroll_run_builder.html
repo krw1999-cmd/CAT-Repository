@@ -1,0 +1,311 @@
+{% extends "base.html" %}
+{% block title %}{{ run.name }}{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+  <div>
+    <h2>{{ run.name }}</h2>
+    <p class="text-muted text-small" style="margin-top:2px">
+      {% if run.period_from or run.period_to %}{{ run.period_from or '?' }} – {{ run.period_to or '?' }}{% endif %}
+      {% if run.pay_date %}&nbsp;· Pay Date: {{ run.pay_date }}{% endif %}
+    </p>
+  </div>
+  <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+    <a href="{{ url_for('payroll_runs_list') }}" class="btn btn-ghost btn-sm">← All Runs</a>
+    <a href="{{ url_for('payroll_run_export', run_id=run.id) }}" class="btn btn-ghost btn-sm">📥 Export Excel</a>
+    {% set print_payees = payees %}
+    <button type="button" class="btn btn-ghost btn-sm"
+            onclick="printAll({{ run.id }}, {{ payees | map(attribute='name') | list | tojson }}, {{ salary_employees | selectattr('fee_recipient_id', 'none') | list | map(attribute='name') | list | tojson }})">
+      🖨 Print All
+    </button>
+    {% if run.status != 'paid' %}
+    <button type="button" class="btn btn-primary btn-sm" onclick="document.getElementById('mark-paid-modal').style.display='flex'">
+      ✓ Mark All Paid
+    </button>
+    {% else %}
+    <span class="status-badge status-released">✓ Paid {{ run.pay_date or '' }}</span>
+    {% endif %}
+  </div>
+</div>
+
+{# Mark-paid modal #}
+<div id="mark-paid-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:8px;padding:28px;min-width:320px;box-shadow:0 8px 32px rgba(0,0,0,.2)">
+    <h3 style="margin:0 0 16px">Mark All Paid</h3>
+    <form action="{{ url_for('payroll_run_mark_paid', run_id=run.id) }}" method="post">
+      <div class="field">
+        <label>Pay Date *</label>
+        <input type="date" name="pay_date" class="input-sm" value="{{ run.pay_date or '' }}" required>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:16px">
+        <button type="submit" class="btn btn-primary btn-sm">Confirm</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('mark-paid-modal').style.display='none'">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{# Run header edit form #}
+<section class="section" style="padding:12px 0">
+  <details style="margin-bottom:4px">
+    <summary class="text-small text-muted" style="cursor:pointer">Edit run details</summary>
+    <form hx-post="{{ url_for('payroll_run_update', run_id=run.id) }}"
+          hx-target="#run-header-display"
+          hx-swap="outerHTML"
+          style="max-width:560px;margin-top:12px">
+      <div class="form-grid-2">
+        <div class="field" style="grid-column:1/-1">
+          <label>Run Name</label>
+          <input type="text" name="name" value="{{ run.name }}" class="input-sm" style="width:100%">
+        </div>
+        <div class="field">
+          <label>Period From</label>
+          <input type="date" name="period_from" value="{{ run.period_from or '' }}" class="input-sm">
+        </div>
+        <div class="field">
+          <label>Period To</label>
+          <input type="date" name="period_to" value="{{ run.period_to or '' }}" class="input-sm">
+        </div>
+        <div class="field">
+          <label>Pay Date</label>
+          <input type="date" name="pay_date" value="{{ run.pay_date or '' }}" class="input-sm">
+        </div>
+        <div class="field">
+          <label>Status</label>
+          <select name="status" class="select-sm">
+            <option value="draft" {% if run.status == 'draft' %}selected{% endif %}>Draft</option>
+            <option value="submitted" {% if run.status == 'submitted' %}selected{% endif %}>Submitted</option>
+            <option value="paid" {% if run.status == 'paid' %}selected{% endif %}>Paid</option>
+          </select>
+        </div>
+        <div class="field" style="grid-column:1/-1">
+          <label>Notes</label>
+          <textarea name="notes" class="input-sm" rows="2" style="width:100%">{{ run.notes or '' }}</textarea>
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary btn-sm">Save</button>
+    </form>
+  </details>
+  <div id="run-header-display"></div>
+</section>
+
+{# Salary-only employees #}
+{% set salary_only = salary_employees | selectattr('fee_recipient_id', 'none') | list %}
+{% if salary_only %}
+<section class="section">
+  <div class="section-header"><h3>Salary Employees</h3></div>
+  <div class="table-wrap">
+    <table class="table table-compact">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th class="text-right">Default Salary</th>
+          <th class="text-right">This Run</th>
+          <th class="actions-col"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for se in salary_only %}
+        <tr>
+          <td><strong>{{ se.name }}</strong>{% if se.company_name %} <span class="text-muted text-small">({{ se.company_name }})</span>{% endif %}</td>
+          <td class="text-right">{{ se.monthly_salary | money }}</td>
+          <td class="text-right">
+            <span id="sal-amount-{{ se.id }}">{{ (se.run_amount or se.monthly_salary) | money }}</span>
+          </td>
+          <td class="actions-col">
+            <form style="display:inline">
+              <input type="number" step="0.01" min="0"
+                     name="amount" value="{{ se.run_amount or se.monthly_salary or 0 }}"
+                     class="input-sm" style="width:100px"
+                     hx-post="{{ url_for('run_salary_set', run_id=run.id, eid=se.id) }}"
+                     hx-target="#sal-amount-{{ se.id }}"
+                     hx-swap="outerHTML"
+                     hx-trigger="change">
+            </form>
+            <a href="{{ url_for('run_employee_print', run_id=run.id, payee_name=se.name) }}"
+               target="_blank" class="btn-icon" title="Print">🖨</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+{# Fee recipient payee cards #}
+{% for payee in payees %}
+<section class="section" id="payee-{{ payee.fee_recipient_id }}">
+  {# Payee header with live totals #}
+  <div id="payee-totals-{{ payee.fee_recipient_id }}">
+    {% include "partials/_run_payee_totals.html" %}
+  </div>
+
+  {# Salary override for fee recipients who also have a salary #}
+  {% if payee.salary_employee_id %}
+  {% set sal_info = salary_employees | selectattr('id', 'equalto', payee.salary_employee_id) | first %}
+  {% if sal_info %}
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+    <span class="text-small text-muted">Salary for this run:</span>
+    <span id="sal-amount-{{ sal_info.id }}">{{ (sal_info.run_amount or sal_info.monthly_salary or 0) | money }}</span>
+    <input type="number" step="0.01" min="0"
+           name="amount" value="{{ sal_info.run_amount or sal_info.monthly_salary or 0 }}"
+           class="input-sm" style="width:100px"
+           hx-post="{{ url_for('run_salary_set', run_id=run.id, eid=sal_info.id) }}"
+           hx-target="#sal-amount-{{ sal_info.id }}"
+           hx-swap="outerHTML"
+           hx-trigger="change">
+  </div>
+  {% endif %}
+  {% endif %}
+
+  {# Transaction splits table #}
+  {% if payee.tx_splits %}
+  <div style="margin-bottom:4px;display:flex;align-items:center;gap:8px">
+    <strong class="text-small">Transactions</strong>
+    <button type="button" class="btn btn-ghost btn-sm"
+            onclick="selectAllSplits({{ payee.fee_recipient_id }}, 'tx')">Select All</button>
+    <button type="button" class="btn btn-ghost btn-sm"
+            onclick="clearAllSplits({{ payee.fee_recipient_id }}, 'tx')">Clear All</button>
+  </div>
+  <div class="table-wrap" style="margin-bottom:12px">
+    <table class="table table-compact" id="tx-table-{{ payee.fee_recipient_id }}">
+      <thead>
+        <tr>
+          <th style="width:32px"></th>
+          <th>Job #</th>
+          <th>Insured</th>
+          <th>Check #</th>
+          <th>Date</th>
+          <th>Type</th>
+          <th class="text-right">Split %</th>
+          <th class="text-right">Earned</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in payee.tx_splits %}
+        <tr class="{% if s.in_run %}row-in-run{% elif s.in_other_run %}row-other-run{% endif %}"
+            id="split-row-{{ s.split_id }}">
+          <td>
+            <input type="checkbox"
+                   {% if s.in_run %}checked{% endif %}
+                   hx-post="{{ url_for('run_split_toggle', run_id=run.id, sid=s.split_id) }}"
+                   hx-target="#payee-totals-{{ payee.fee_recipient_id }}"
+                   hx-swap="outerHTML"
+                   hx-include="this"
+                   class="tx-check-{{ payee.fee_recipient_id }}">
+          </td>
+          <td class="text-small">
+            <a href="{{ url_for('claim_detail', claim_id=s.claim_id) }}" target="_blank">{{ s.job_number or '—' }}</a>
+          </td>
+          <td class="text-small">{{ s.insured_name or '—' }}</td>
+          <td class="text-small">{{ s.check_number or '—' }}</td>
+          <td class="text-small">{{ s.date or '—' }}</td>
+          <td class="text-small">{{ s.type or '—' }}</td>
+          <td class="text-right text-small">{{ s.split_pct }}%</td>
+          <td class="text-right text-small">
+            {{ s.earned | money }}
+            {% if s.in_other_run %}
+            <span class="status-badge status-inv-pending" title="In run: {{ s.other_run_name }}">⚠ Other run</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {# Expense splits table #}
+  {% if payee.exp_splits %}
+  <div style="margin-bottom:4px;display:flex;align-items:center;gap:8px">
+    <strong class="text-small">Expenses</strong>
+    <button type="button" class="btn btn-ghost btn-sm"
+            onclick="selectAllSplits({{ payee.fee_recipient_id }}, 'exp')">Select All</button>
+    <button type="button" class="btn btn-ghost btn-sm"
+            onclick="clearAllSplits({{ payee.fee_recipient_id }}, 'exp')">Clear All</button>
+  </div>
+  <div class="table-wrap">
+    <table class="table table-compact" id="exp-table-{{ payee.fee_recipient_id }}">
+      <thead>
+        <tr>
+          <th style="width:32px"></th>
+          <th>Job #</th>
+          <th>Insured</th>
+          <th>Date</th>
+          <th>Vendor</th>
+          <th class="text-right">Split %</th>
+          <th class="text-right">Owed</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for es in payee.exp_splits %}
+        <tr class="{% if es.in_run %}row-in-run{% elif es.in_other_run %}row-other-run{% endif %}"
+            id="exp-split-row-{{ es.exp_split_id }}">
+          <td>
+            <input type="checkbox"
+                   {% if es.in_run %}checked{% endif %}
+                   hx-post="{{ url_for('run_exp_split_toggle', run_id=run.id, sid=es.exp_split_id) }}"
+                   hx-target="#payee-totals-{{ payee.fee_recipient_id }}"
+                   hx-swap="outerHTML"
+                   hx-include="this"
+                   class="exp-check-{{ payee.fee_recipient_id }}">
+          </td>
+          <td class="text-small">{{ es.job_number or '—' }}</td>
+          <td class="text-small">{{ es.insured_name or '—' }}</td>
+          <td class="text-small">{{ es.date or '—' }}</td>
+          <td class="text-small">{{ es.vendor or '—' }}</td>
+          <td class="text-right text-small">{{ es.split_pct }}%</td>
+          <td class="text-right text-small">
+            {{ es.owed | money }}
+            {% if es.in_other_run %}
+            <span class="status-badge status-inv-pending" title="In run: {{ es.other_run_name }}">⚠ Other run</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if not payee.tx_splits and not payee.exp_splits %}
+  <p class="text-muted text-small">No unpaid splits for this person.</p>
+  {% endif %}
+
+  <div style="margin-top:8px">
+    <a href="{{ url_for('run_employee_print', run_id=run.id, payee_name=payee.name) }}"
+       target="_blank" class="btn btn-ghost btn-sm">🖨 Print</a>
+  </div>
+</section>
+{% endfor %}
+
+{% if not payees and not salary_employees %}
+<section class="section">
+  <p class="text-muted">No payees with unpaid splits found. Add fee recipients and their splits first.</p>
+</section>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+function selectAllSplits(frId, kind) {
+  var cls = kind === 'tx' ? '.tx-check-' + frId : '.exp-check-' + frId;
+  document.querySelectorAll(cls).forEach(function(cb) {
+    if (!cb.checked) { cb.click(); }
+  });
+}
+function clearAllSplits(frId, kind) {
+  var cls = kind === 'tx' ? '.tx-check-' + frId : '.exp-check-' + frId;
+  document.querySelectorAll(cls).forEach(function(cb) {
+    if (cb.checked) { cb.click(); }
+  });
+}
+function printAll(runId, payeeNames, salaryNames) {
+  var all = payeeNames.concat(salaryNames);
+  all.forEach(function(name) {
+    window.open('/payroll/runs/' + runId + '/employees/' + encodeURIComponent(name) + '/print', '_blank');
+  });
+}
+</script>
+{% endblock %}

@@ -1,4 +1,4 @@
-<tr id="deferred-link-{{ link.id }}">
+<tr id="recouped-link-{{ link.id }}">
   <td><a href="{{ url_for('tx_detail', claim_id=claim.id, tx_id=link.deferred_tx_id) }}" class="text-muted">#{{ link.sequence_number or '—' }}</a></td>
   <td>
     <span class="tx-type-badge tx-type-{{ (link.type or 'other')|lower|replace(' ', '-') }}">
@@ -10,15 +10,15 @@
   <td class="num">{{ (link.deferred or 0) | money }}</td>
   <td class="actions-col">
     <button class="btn-icon"
-            hx-get="{{ url_for('deferred_link_edit_row', claim_id=claim.id, tx_id=tx.id, lid=link.id) }}"
-            hx-target="#deferred-link-{{ link.id }}"
+            hx-get="{{ url_for('recouped_link_edit_row', claim_id=claim.id, tx_id=tx.id, lid=link.id) }}"
+            hx-target="#recouped-link-{{ link.id }}"
             hx-swap="outerHTML"
             title="Edit">✎</button>
     <button class="btn-icon btn-icon-danger"
-            hx-delete="{{ url_for('deferred_link_delete', claim_id=claim.id, tx_id=tx.id, lid=link.id) }}"
-            hx-target="#deferred-link-{{ link.id }}"
+            hx-delete="{{ url_for('recouped_link_delete', claim_id=claim.id, tx_id=tx.id, lid=link.id) }}"
+            hx-target="#recouped-link-{{ link.id }}"
             hx-swap="outerHTML"
-            hx-confirm="Remove this deferred fee link?"
+            hx-confirm="Remove this deferred check link?"
             title="Delete">✕</button>
   </td>
 </tr>

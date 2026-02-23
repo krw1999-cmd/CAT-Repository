@@ -960,6 +960,9 @@ def tx_detail(claim_id: int, tx_id: int):
         invoice_deferred_links = db_module.get_invoice_deferred_links(tx_id)
         claim_txs_for_select = db_module.get_claim_transactions_for_select(claim_id, exclude_tx_id=tx_id)
 
+    recouped_links = db_module.get_recouped_deferred_links(tx_id)
+    claim_txs_with_deferred = db_module.get_claim_txs_with_deferred(claim_id)
+
     # Outstanding deferred (deferred − recouped) — matches the summary card value
     _summary = db_module.get_transaction_summary(claim_id)
     claim_total_deferred = max(0.0, float(_summary.get("deferred_vs_recouped") or 0))
@@ -980,6 +983,8 @@ def tx_detail(claim_id: int, tx_id: int):
         invoice_payments=invoice_payments,
         invoice_deferred_links=invoice_deferred_links,
         claim_txs_for_select=claim_txs_for_select,
+        recouped_links=recouped_links,
+        claim_txs_with_deferred=claim_txs_with_deferred,
         roles=ASSIGNEE_ROLES,
         coverage_types=db_module.get_claim_coverage_types(claim_id),
         tx_types=TRANSACTION_TYPES,
@@ -1977,6 +1982,7 @@ def fee_recipients_options():
 def fee_recipient_create():
     data = {
         "name":         request.form.get("name", "").strip(),
+        "company_name": request.form.get("company_name", "").strip(),
         "default_role": request.form.get("default_role", "").strip(),
     }
     if not data["name"]:
@@ -1995,6 +2001,7 @@ def fee_recipient_create():
 def fee_recipient_update(rid: int):
     data = {
         "name":         request.form.get("name", "").strip(),
+        "company_name": request.form.get("company_name", "").strip(),
         "default_role": request.form.get("default_role", "").strip(),
     }
     db_module.update_fee_recipient(rid, data)
@@ -2331,6 +2338,87 @@ def deferred_link_delete(claim_id: int, tx_id: int, lid: int):
 
 
 # ---------------------------------------------------------------------------
+# Recouped Deferred Links — HTMX fragments (on transaction detail page)
+# ---------------------------------------------------------------------------
+
+@app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/recouped-links/new-row")
+@login_required
+def recouped_link_new_row(claim_id: int, tx_id: int):
+    claim = db_module.get_claim(claim_id)
+    tx = db_module.get_transaction(tx_id)
+    claim_txs_with_deferred = db_module.get_claim_txs_with_deferred(claim_id)
+    return render_template("partials/_recouped_link_edit.html",
+                           claim=claim, tx=tx,
+                           claim_txs_with_deferred=claim_txs_with_deferred)
+
+
+@app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/recouped-links", methods=["POST"])
+@login_required
+def recouped_link_create(claim_id: int, tx_id: int):
+    deferred_tx_id = request.form.get("deferred_tx_id")
+    if not deferred_tx_id:
+        return "deferred_tx_id required", 400
+    lid = db_module.create_recouped_deferred_link(tx_id, int(deferred_tx_id))
+    links = db_module.get_recouped_deferred_links(tx_id)
+    link = next((x for x in links if x["id"] == lid), None)
+    claim = db_module.get_claim(claim_id)
+    tx = db_module.get_transaction(tx_id)
+    row_html = render_template("partials/_recouped_link_row.html", claim=claim, tx=tx, link=link)
+    placeholder = '<tr id="recouped-link-new-row-placeholder"></tr>'
+    return row_html + placeholder
+
+
+@app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/recouped-links/<int:lid>/edit")
+@login_required
+def recouped_link_edit_row(claim_id: int, tx_id: int, lid: int):
+    claim = db_module.get_claim(claim_id)
+    tx = db_module.get_transaction(tx_id)
+    links = db_module.get_recouped_deferred_links(tx_id)
+    link = next((l for l in links if l["id"] == lid), None)
+    if not link:
+        abort(404)
+    claim_txs_with_deferred = db_module.get_claim_txs_with_deferred(claim_id)
+    return render_template("partials/_recouped_link_edit.html",
+                           claim=claim, tx=tx, link=link,
+                           claim_txs_with_deferred=claim_txs_with_deferred)
+
+
+@app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/recouped-links/<int:lid>/view")
+@login_required
+def recouped_link_view_row(claim_id: int, tx_id: int, lid: int):
+    claim = db_module.get_claim(claim_id)
+    tx = db_module.get_transaction(tx_id)
+    links = db_module.get_recouped_deferred_links(tx_id)
+    link = next((l for l in links if l["id"] == lid), None)
+    if not link:
+        abort(404)
+    return render_template("partials/_recouped_link_row.html", claim=claim, tx=tx, link=link)
+
+
+@app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/recouped-links/<int:lid>",
+           methods=["PUT"])
+@login_required
+def recouped_link_update(claim_id: int, tx_id: int, lid: int):
+    deferred_tx_id = request.form.get("deferred_tx_id")
+    if not deferred_tx_id:
+        abort(400)
+    db_module.update_recouped_deferred_link(lid, int(deferred_tx_id))
+    links = db_module.get_recouped_deferred_links(tx_id)
+    link = next((l for l in links if l["id"] == lid), None)
+    claim = db_module.get_claim(claim_id)
+    tx = db_module.get_transaction(tx_id)
+    return render_template("partials/_recouped_link_row.html", claim=claim, tx=tx, link=link)
+
+
+@app.route("/claims/<int:claim_id>/transactions/<int:tx_id>/recouped-links/<int:lid>",
+           methods=["DELETE"])
+@login_required
+def recouped_link_delete(claim_id: int, tx_id: int, lid: int):
+    db_module.delete_recouped_deferred_link(lid)
+    return ""
+
+
+# ---------------------------------------------------------------------------
 # Payroll — claim payroll page
 # ---------------------------------------------------------------------------
 
@@ -2475,8 +2563,7 @@ def site_split_toggle_paid(sid: int):
     split = db_module.get_split(sid)
     if not split:
         return "", 404
-    fee_collected = db_module._payroll_fee_collected_for_tx(split["transaction_id"])
-    earned = round(fee_collected * float(split.get("split_pct") or 0) / 100, 2)
+    earned = db_module._payroll_earned_for_split(split)
     paid = float(split.get("payroll_paid") or 0)
     status = db_module._payroll_status(earned, paid)
     badge = _payroll_badge_html(status, paid, split.get("payroll_paid_date") or "", sid=sid, kind="splits")
@@ -2515,8 +2602,7 @@ def site_split_set_date(sid: int):
     split = db_module.get_split(sid)
     if not split:
         return "", 404
-    fee_collected = db_module._payroll_fee_collected_for_tx(split["transaction_id"])
-    earned = round(fee_collected * float(split.get("split_pct") or 0) / 100, 2)
+    earned = db_module._payroll_earned_for_split(split)
     paid = float(split.get("payroll_paid") or 0)
     status = db_module._payroll_status(earned, paid)
     badge = _payroll_badge_html(status, paid, split.get("payroll_paid_date") or "", sid=sid, kind="splits")
@@ -2546,34 +2632,461 @@ def site_expense_split_set_date(sid: int):
     return f'<span id="exp-split-status-{sid}" hx-swap-oob="true">{badge}</span>'
 
 
+@app.route("/payroll/splits/<int:sid>/set-paid", methods=["POST"])
+@login_required
+def site_split_set_paid(sid: int):
+    try:
+        amount = float(request.form.get("amount", 0))
+    except (TypeError, ValueError):
+        amount = 0.0
+    paid_date = request.form.get("paid_date", "").strip() or None
+    db_module.set_split_paid_amount(sid, amount)
+    db_module.get_db().execute(
+        "UPDATE transaction_splits SET payroll_paid_date=? WHERE id=?", (paid_date, sid)
+    )
+    db_module.get_db().commit()
+    split = db_module.get_split(sid)
+    if not split:
+        return "", 404
+    earned = db_module._payroll_earned_for_split(split)
+    paid = float(split.get("payroll_paid") or 0)
+    status = db_module._payroll_status(earned, paid)
+    badge = _payroll_badge_html(status, paid, split.get("payroll_paid_date") or "", sid=sid, kind="splits")
+    return f'<span id="split-status-{sid}">{badge}</span>'
+
+
+@app.route("/payroll/expense-splits/<int:sid>/set-paid", methods=["POST"])
+@login_required
+def site_expense_split_set_paid(sid: int):
+    try:
+        amount = float(request.form.get("amount", 0))
+    except (TypeError, ValueError):
+        amount = 0.0
+    paid_date = request.form.get("paid_date", "").strip() or None
+    db_module.set_expense_split_paid_amount(sid, amount)
+    db_module.get_db().execute(
+        "UPDATE expense_splits SET payroll_paid_date=? WHERE id=?", (paid_date, sid)
+    )
+    db_module.get_db().commit()
+    es_row = db_module._row(db_module.get_db(), "SELECT * FROM expense_splits WHERE id=?", (sid,))
+    if not es_row:
+        return "", 404
+    es_row = dict(es_row)
+    exp_row = db_module._row(db_module.get_db(),
+                             "SELECT wp_amount FROM expenses WHERE id=?", (es_row["expense_id"],))
+    wp_amount = float(exp_row["wp_amount"] or 0) if exp_row else 0.0
+    earned = round(wp_amount * float(es_row.get("split_pct") or 0) / 100, 2)
+    paid = float(es_row.get("payroll_paid") or 0)
+    status = db_module._payroll_status(earned, paid)
+    badge = _payroll_badge_html(status, paid, es_row.get("payroll_paid_date") or "", sid=sid, kind="expense-splits")
+    return f'<span id="exp-split-status-{sid}">{badge}</span>'
+
+
 def _payroll_badge_html(status: str, paid: float, paid_date: str,
                         sid: int = 0, kind: str = "splits") -> str:
     """Return the inner HTML for a payroll paid-status cell."""
-    if status == "paid":
-        target     = f"split-status-{sid}" if kind == "splits" else f"exp-split-status-{sid}"
-        toggle_url = f"/payroll/{kind}/{sid}/toggle-paid"
-        date_url   = f"/payroll/{kind}/{sid}/set-date"
-        date_val   = paid_date or ""
-        date_label = date_val or "—"
+    if status in ("paid", "partial"):
+        target      = f"split-status-{sid}" if kind == "splits" else f"exp-split-status-{sid}"
+        toggle_url  = f"/payroll/{kind}/{sid}/toggle-paid"
+        set_paid_url = f"/payroll/{kind}/{sid}/set-paid"
+        date_val    = paid_date or ""
+        badge_cls   = "status-released" if status == "paid" else "status-inv-pending"
+        badge_txt   = (f"✓ Paid {paid_date}" if paid_date else "✓ Paid") if status == "paid" else f"Partial ${paid:,.2f}"
         return (
-            f'<button type="button" class="status-badge status-released payroll-unmark-btn"'
+            f'<button type="button" class="status-badge {badge_cls} payroll-unmark-btn"'
             f' hx-post="{toggle_url}" hx-vals=\'{{"paid_date":""}}\''
             f' hx-target="#{target}" hx-swap="outerHTML"'
-            f' title="Click to unmark paid">✓</button>'
-            f'<span class="payroll-date-display">{date_label}</span>'
-            f'<button type="button" class="btn-icon payroll-edit-date-btn"'
-            f' onclick="payrollStartEditDate(this)" title="Edit date">✎</button>'
-            f'<span class="payroll-date-editor" style="display:none">'
+            f' title="Click to unmark paid">{badge_txt}</button>'
+            f'<button type="button" class="btn-icon payroll-edit-btn"'
+            f' onclick="payrollStartEdit(this)" title="Edit amount & date">✎</button>'
+            f'<span class="payroll-editor" style="display:none">'
+            f'<input type="number" step="0.01" min="0" value="{paid:.2f}"'
+            f' name="amount" class="input-sm" style="width:160px">'
             f'<input type="date" name="paid_date" value="{date_val}" class="input-sm payroll-date-edit">'
             f'<button type="button" class="btn btn-primary btn-sm"'
-            f' onclick="payrollSaveDate(this,\'{date_url}\',\'#{target}\')">Save</button>'
+            f' onclick="payrollSaveEdit(this,\'{set_paid_url}\',\'#{target}\')">Save</button>'
             f'<button type="button" class="btn btn-ghost btn-sm"'
-            f' onclick="payrollCancelDate(this)">Cancel</button>'
+            f' onclick="payrollCancelEdit(this)">Cancel</button>'
             f'</span>'
         )
-    if status == "partial":
-        return f'<span class="status-badge status-inv-pending">Partial ${paid:,.2f}</span>'
     return '<span class="text-muted">—</span>'
+
+
+# ---------------------------------------------------------------------------
+# Payroll Runs
+# ---------------------------------------------------------------------------
+
+@app.route("/payroll/salary-employees")
+@login_required
+def salary_employees_list():
+    employees = db_module.get_all_salary_employees()
+    recipients = db_module.get_all_fee_recipients()
+    return render_template("payroll_salary_employees.html",
+                           employees=employees, recipients=recipients,
+                           roles=ASSIGNEE_ROLES)
+
+
+@app.route("/payroll/salary-employees", methods=["POST"])
+@login_required
+def salary_employee_create():
+    name = request.form.get("name", "").strip()
+    salary = db_module._f(request.form.get("monthly_salary"))
+    company_name = request.form.get("company_name", "").strip() or None
+    frid = request.form.get("fee_recipient_id") or None
+    if frid:
+        try:
+            frid = int(frid)
+        except ValueError:
+            frid = None
+    if name:
+        db_module.create_salary_employee(name, salary, company_name, frid)
+    employees = db_module.get_all_salary_employees()
+    recipients = db_module.get_all_fee_recipients()
+    return render_template("payroll_salary_employees.html",
+                           employees=employees, recipients=recipients,
+                           roles=ASSIGNEE_ROLES)
+
+
+@app.route("/payroll/salary-employees/<int:emp_id>", methods=["PUT"])
+@login_required
+def salary_employee_update(emp_id: int):
+    frid = request.form.get("fee_recipient_id") or None
+    if frid:
+        try:
+            frid = int(frid)
+        except ValueError:
+            frid = None
+    data = {
+        "name": request.form.get("name", "").strip(),
+        "company_name": request.form.get("company_name", "").strip() or None,
+        "monthly_salary": db_module._f(request.form.get("monthly_salary")),
+        "fee_recipient_id": frid,
+        "active": request.form.get("active", "1") != "0",
+    }
+    db_module.update_salary_employee(emp_id, data)
+    employees = db_module.get_all_salary_employees()
+    recipients = db_module.get_all_fee_recipients()
+    return render_template("payroll_salary_employees.html",
+                           employees=employees, recipients=recipients,
+                           roles=ASSIGNEE_ROLES)
+
+
+@app.route("/payroll/salary-employees/<int:emp_id>", methods=["DELETE"])
+@login_required
+def salary_employee_delete(emp_id: int):
+    db_module.delete_salary_employee(emp_id)
+    employees = db_module.get_all_salary_employees()
+    recipients = db_module.get_all_fee_recipients()
+    return render_template("payroll_salary_employees.html",
+                           employees=employees, recipients=recipients,
+                           roles=ASSIGNEE_ROLES)
+
+
+@app.route("/payroll/runs")
+@login_required
+def payroll_runs_list():
+    runs = db_module.get_payroll_runs()
+    return render_template("payroll_runs.html", runs=runs)
+
+
+@app.route("/payroll/runs/new", methods=["GET"])
+@login_required
+def payroll_run_new_form():
+    return render_template("payroll_runs.html",
+                           runs=db_module.get_payroll_runs(),
+                           show_new_form=True)
+
+
+@app.route("/payroll/runs/new", methods=["POST"])
+@login_required
+def payroll_run_create():
+    name = request.form.get("name", "").strip()
+    if not name:
+        name = "Untitled Run"
+    period_from = _clean_date(request.form.get("period_from"))
+    period_to = _clean_date(request.form.get("period_to"))
+    pay_date = _clean_date(request.form.get("pay_date"))
+    run_id = db_module.create_payroll_run(name, period_from, period_to, pay_date)
+    return redirect(url_for("payroll_run_builder", run_id=run_id))
+
+
+@app.route("/payroll/runs/<int:run_id>")
+@login_required
+def payroll_run_builder(run_id: int):
+    data = db_module.get_run_builder_data(run_id)
+    if not data:
+        abort(404)
+    return render_template("payroll_run_builder.html", **data)
+
+
+@app.route("/payroll/runs/<int:run_id>/update", methods=["POST"])
+@login_required
+def payroll_run_update(run_id: int):
+    run = db_module.get_payroll_run(run_id)
+    if not run:
+        abort(404)
+    data = {
+        "name": request.form.get("name", "").strip() or run["name"],
+        "period_from": _clean_date(request.form.get("period_from")),
+        "period_to": _clean_date(request.form.get("period_to")),
+        "pay_date": _clean_date(request.form.get("pay_date")),
+        "status": request.form.get("status", run.get("status", "draft")),
+        "notes": request.form.get("notes", "").strip() or None,
+    }
+    db_module.update_payroll_run(run_id, data)
+    run = db_module.get_payroll_run(run_id)
+    return render_template("partials/_run_header.html", run=run)
+
+
+@app.route("/payroll/runs/<int:run_id>", methods=["DELETE"])
+@login_required
+def payroll_run_delete(run_id: int):
+    db_module.delete_payroll_run(run_id)
+    runs = db_module.get_payroll_runs()
+    return render_template("payroll_runs.html", runs=runs)
+
+
+@app.route("/payroll/runs/<int:run_id>/mark-paid", methods=["POST"])
+@login_required
+def payroll_run_mark_paid(run_id: int):
+    run = db_module.get_payroll_run(run_id)
+    if not run:
+        abort(404)
+    pay_date = _clean_date(request.form.get("pay_date")) or run.get("pay_date") or ""
+    db_module.mark_run_paid(run_id, pay_date)
+    return redirect(url_for("payroll_run_builder", run_id=run_id))
+
+
+@app.route("/payroll/runs/<int:run_id>/splits/<int:sid>/toggle", methods=["POST"])
+@login_required
+def run_split_toggle(run_id: int, sid: int):
+    in_run = db_module.toggle_split_in_run(run_id, sid)
+    data = db_module.get_run_builder_data(run_id)
+    if not data:
+        abort(404)
+    # Find the payee that owns this split
+    for payee in data["payees"]:
+        for s in payee["tx_splits"]:
+            if s["split_id"] == sid:
+                return render_template("partials/_run_payee_totals.html",
+                                       payee=payee, run=data["run"])
+    return "", 204
+
+
+@app.route("/payroll/runs/<int:run_id>/exp-splits/<int:sid>/toggle", methods=["POST"])
+@login_required
+def run_exp_split_toggle(run_id: int, sid: int):
+    db_module.toggle_exp_split_in_run(run_id, sid)
+    data = db_module.get_run_builder_data(run_id)
+    if not data:
+        abort(404)
+    for payee in data["payees"]:
+        for es in payee["exp_splits"]:
+            if es["exp_split_id"] == sid:
+                return render_template("partials/_run_payee_totals.html",
+                                       payee=payee, run=data["run"])
+    return "", 204
+
+
+@app.route("/payroll/runs/<int:run_id>/salaries/<int:eid>/set", methods=["POST"])
+@login_required
+def run_salary_set(run_id: int, eid: int):
+    try:
+        amount = float(request.form.get("amount", 0))
+    except (TypeError, ValueError):
+        amount = 0.0
+    db_module.set_run_salary_override(run_id, eid, amount)
+    # Return updated salary row fragment
+    data = db_module.get_run_builder_data(run_id)
+    if not data:
+        abort(404)
+    for se in data["salary_employees"]:
+        if se["id"] == eid:
+            return f'<span id="sal-amount-{eid}">${amount:,.2f}</span>'
+    return f'<span id="sal-amount-{eid}">${amount:,.2f}</span>'
+
+
+@app.route("/payroll/runs/<int:run_id>/employees/<path:payee_name>/print")
+@login_required
+def run_employee_print(run_id: int, payee_name: str):
+    data = db_module.get_run_builder_data(run_id)
+    if not data:
+        abort(404)
+    # Find the payee
+    payee = None
+    for p in data["payees"]:
+        if p["name"] == payee_name:
+            payee = p
+            break
+    # Also check salary-only employees
+    salary_emp = None
+    if payee is None:
+        for se in data["salary_employees"]:
+            if se["name"] == payee_name and se.get("fee_recipient_id") is None:
+                salary_emp = se
+                break
+    if payee is None and salary_emp is None:
+        abort(404)
+    return render_template("payroll_employee_print.html",
+                           run=data["run"],
+                           payee=payee,
+                           salary_emp=salary_emp)
+
+
+@app.route("/payroll/runs/<int:run_id>/export.xlsx")
+@login_required
+def payroll_run_export(run_id: int):
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, numbers
+    from openpyxl.utils import get_column_letter
+
+    data = db_module.get_run_builder_data(run_id)
+    if not data:
+        abort(404)
+    run = data["run"]
+
+    wb = openpyxl.Workbook()
+
+    # ---- Summary tab ----
+    ws = wb.active
+    ws.title = "Payroll Summary"
+    header_font = Font(bold=True)
+    money_fmt = '#,##0.00'
+
+    ws.append(["Name", "Salary", "Fee Earnings", "Expenses", "Total"])
+    for cell in ws[1]:
+        cell.font = header_font
+
+    grand_salary = grand_fees = grand_exp = grand_total = 0.0
+
+    # Salary-only employees first
+    for se in data["salary_employees"]:
+        if se.get("fee_recipient_id") is not None:
+            continue  # will be shown in payee section
+        amt = float(se.get("run_amount") or se.get("monthly_salary") or 0)
+        ws.append([se["name"], amt, 0, 0, amt])
+        for cell in ws[ws.max_row][1:]:
+            cell.number_format = money_fmt
+        grand_salary += amt
+        grand_total += amt
+
+    # Fee recipients
+    for payee in data["payees"]:
+        sel_tx = payee["selected_tx_total"]
+        sel_exp = payee["selected_exp_total"]
+        sal = payee["salary_amount"]
+        total = round(sel_tx + sel_exp + sal, 2)
+        ws.append([payee["name"], sal, sel_tx, sel_exp, total])
+        for cell in ws[ws.max_row][1:]:
+            cell.number_format = money_fmt
+        grand_salary += sal
+        grand_fees += sel_tx
+        grand_exp += sel_exp
+        grand_total += total
+
+    # Totals row
+    ws.append(["TOTAL", grand_salary, grand_fees, grand_exp, grand_total])
+    for cell in ws[ws.max_row]:
+        cell.font = header_font
+        if cell.column > 1:
+            cell.number_format = money_fmt
+
+    # Auto-width
+    for col in ws.columns:
+        max_len = max((len(str(c.value or "")) for c in col), default=0)
+        ws.column_dimensions[get_column_letter(col[0].column)].width = max(max_len + 4, 12)
+
+    # ---- Per-payee tabs ----
+    for payee in data["payees"]:
+        sel_tx = [s for s in payee["tx_splits"] if s["in_run"]]
+        sel_exp = [s for s in payee["exp_splits"] if s["in_run"]]
+        if not sel_tx and not sel_exp and not payee["salary_amount"]:
+            continue
+
+        tab_name = payee["name"][:31]
+        ws2 = wb.create_sheet(title=tab_name)
+
+        # Header block
+        ws2.append(["Name:", payee["name"]])
+        ws2.append(["Company:", payee.get("company_name") or ""])
+        ws2.append(["Pay Period:",
+                    f"{run.get('period_from','') or ''} – {run.get('period_to','') or ''}"])
+        ws2.append(["Pay Date:", run.get("pay_date") or ""])
+        ws2.append([])
+
+        if sel_tx:
+            ws2.append(["Job #", "Insured", "Check #", "Date", "Type", "Split %", "Earned"])
+            for cell in ws2[ws2.max_row]:
+                cell.font = header_font
+            for s in sel_tx:
+                ws2.append([
+                    s["job_number"], s["insured_name"], s["check_number"],
+                    s["date"], s["type"],
+                    s["split_pct"], s["earned"],
+                ])
+                ws2.cell(ws2.max_row, 7).number_format = money_fmt
+            ws2.append([])
+
+        if sel_exp:
+            ws2.append(["Job #", "Insured", "Date", "Vendor", "Split %", "Owed"])
+            for cell in ws2[ws2.max_row]:
+                cell.font = header_font
+            for es in sel_exp:
+                ws2.append([
+                    es["job_number"], es["insured_name"], es["date"],
+                    es["vendor"], es["split_pct"], es["owed"],
+                ])
+                ws2.cell(ws2.max_row, 6).number_format = money_fmt
+            ws2.append([])
+
+        # Summary footer
+        fee_sub = payee["selected_tx_total"]
+        exp_sub = payee["selected_exp_total"]
+        sal = payee["salary_amount"]
+        ws2.append(["Fee Subtotal:", fee_sub])
+        ws2.cell(ws2.max_row, 2).number_format = money_fmt
+        ws2.append(["Expenses Subtotal:", exp_sub])
+        ws2.cell(ws2.max_row, 2).number_format = money_fmt
+        ws2.append(["Base Salary:", sal])
+        ws2.cell(ws2.max_row, 2).number_format = money_fmt
+        ws2.append(["GRAND TOTAL:", round(fee_sub + exp_sub + sal, 2)])
+        ws2.cell(ws2.max_row, 1).font = header_font
+        ws2.cell(ws2.max_row, 2).font = header_font
+        ws2.cell(ws2.max_row, 2).number_format = money_fmt
+
+        for col in ws2.columns:
+            max_len = max((len(str(c.value or "")) for c in col), default=0)
+            ws2.column_dimensions[get_column_letter(col[0].column)].width = max(max_len + 4, 14)
+
+    # ---- Salary-only tabs ----
+    for se in data["salary_employees"]:
+        if se.get("fee_recipient_id") is not None:
+            continue
+        amt = float(se.get("run_amount") or se.get("monthly_salary") or 0)
+        tab_name = (se["name"] + " (Salary)")[:31]
+        ws3 = wb.create_sheet(title=tab_name)
+        ws3.append(["Name:", se["name"]])
+        ws3.append(["Company:", se.get("company_name") or ""])
+        ws3.append(["Pay Period:",
+                    f"{run.get('period_from','') or ''} – {run.get('period_to','') or ''}"])
+        ws3.append(["Pay Date:", run.get("pay_date") or ""])
+        ws3.append([])
+        ws3.append(["Salary:", amt])
+        ws3.cell(ws3.max_row, 2).number_format = money_fmt
+        ws3.cell(ws3.max_row, 1).font = Font(bold=True)
+        ws3.cell(ws3.max_row, 2).font = Font(bold=True)
+        ws3.column_dimensions["A"].width = 20
+        ws3.column_dimensions["B"].width = 16
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    safe_name = run["name"].replace(" ", "_").replace("/", "-")
+    return Response(
+        buf.getvalue(),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}.xlsx"'},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2887,6 +3400,99 @@ def _do_import(form, parsed: dict) -> int:
 def global_status():
     data = db_module.get_global_status()
     return render_template("status.html", **data)
+
+
+@app.route("/status/export.csv")
+@login_required
+def status_export():
+    data = db_module.get_global_status()
+    adjuster = request.args.get("adjuster", "").strip()
+
+    def _adj_match(claim_id):
+        if not adjuster:
+            return True
+        return adjuster in data["claim_adjusters"].get(claim_id, [])
+
+    pending_checks       = [r for r in data["pending_checks"]       if _adj_match(r["claim_id"])]
+    open_escrow          = [r for r in data["open_escrow"]          if _adj_match(r["claim_id"])]
+    unrecouped           = [r for r in data["unrecouped_deferred"]  if _adj_match(r["claim_id"])]
+    pending_expenses     = [r for r in data["pending_expenses"]     if _adj_match(r["claim_id"])]
+    pending_fee_invoices = [r for r in data["pending_fee_invoices"] if _adj_match(r["claim_id"])]
+
+    out = io.StringIO()
+    writer = csv.writer(out)
+
+    writer.writerow(["PENDING CHECKS"])
+    writer.writerow(["Insured", "Job #", "Check #", "Type", "Date", "Amount",
+                     "Fee Rcvd", "Client Rcvd", "Adjusters", "Notes"])
+    for r in pending_checks:
+        fee_ok = not r.get("fee_not_received_count") or r["fee_not_received_count"] == 0
+        client_ok = not r.get("pending_client_count") or r["pending_client_count"] == 0
+        adjs = " | ".join(data["claim_adjusters"].get(r["claim_id"], []))
+        writer.writerow([
+            r["insured_name"], r["job_number"] or "", r["check_number"] or "",
+            r["type"], r["check_date"] or "", r["amount"],
+            "Yes" if (not r.get("fee_applicable_count") or fee_ok) else "Pending",
+            "Yes" if client_ok else f"{r['pending_client_count']} pending",
+            adjs, r.get("status_notes") or "",
+        ])
+
+    writer.writerow([])
+    writer.writerow(["MONEY IN ESCROW"])
+    writer.writerow(["Insured", "Job #", "Claim #", "Escrowed", "Drawn", "Net in Escrow",
+                     "Adjusters", "Notes"])
+    for r in open_escrow:
+        adjs = " | ".join(data["claim_adjusters"].get(r["claim_id"], []))
+        writer.writerow([
+            r["insured_name"], r["job_number"] or "", r["claim_number"] or "",
+            r["total_escrowed"], r["total_drawn"], r["net_in_escrow"],
+            adjs, r.get("status_notes") or "",
+        ])
+
+    writer.writerow([])
+    writer.writerow(["UNRECOUPED DEFERRED FEES"])
+    writer.writerow(["Insured", "Job #", "Claim #", "Deferred", "Recouped", "Outstanding",
+                     "Adjusters"])
+    for r in unrecouped:
+        adjs = " | ".join(data["claim_adjusters"].get(r["claim_id"], []))
+        writer.writerow([
+            r["insured_name"], r["job_number"] or "", r["claim_number"] or "",
+            r["total_deferred"], r["total_recouped"], r["unrecouped"], adjs,
+        ])
+
+    writer.writerow([])
+    writer.writerow(["PENDING FEE INVOICES"])
+    writer.writerow(["Insured", "Job #", "Invoice #", "Date", "Invoice Amt",
+                     "Collected", "Balance Due", "Adjusters"])
+    for r in pending_fee_invoices:
+        adjs = " | ".join(data["claim_adjusters"].get(r["claim_id"], []))
+        writer.writerow([
+            r["insured_name"], r["job_number"] or "", r["invoice_number"] or "",
+            r["date"] or "", r["amount"], r["total_collected"], r["balance_due"], adjs,
+        ])
+
+    writer.writerow([])
+    writer.writerow(["PENDING EXPENSES"])
+    writer.writerow(["Insured", "Job #", "Date", "Payee", "Reason", "Responsible Party",
+                     "Invoice Amount", "Owed to Payee", "Reimburse Owed", "WP Reimb Owed",
+                     "Adjusters", "Notes"])
+    for r in pending_expenses:
+        adjs = " | ".join(data["claim_adjusters"].get(r["claim_id"], []))
+        writer.writerow([
+            r["insured_name"], r["job_number"] or "", r["invoice_date"] or "",
+            r["payee_name"] or "", r["reason"] or "", r["responsible_party"] or "",
+            r["invoice_amount"], r["outstanding"], r["reimburse_owed"], r["wp_reimburse_owed"],
+            adjs, r.get("status_notes") or "",
+        ])
+
+    out.seek(0)
+    suffix = f"_{adjuster.replace(' ', '_')}" if adjuster else ""
+    filename = f"status{suffix}_{date.today().isoformat()}.csv"
+    return Response(
+        out.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
 
 @app.route("/status/tx/<int:tx_id>/note", methods=["POST"])

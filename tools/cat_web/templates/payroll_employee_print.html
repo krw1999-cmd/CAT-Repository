@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>
+    {% if payee %}{{ payee.name }}{% elif salary_emp %}{{ salary_emp.name }}{% endif %} — {{ run.name }}
+  </title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 11pt; color: #000; background: #fff; padding: 0.75in; }
+    h1 { font-size: 16pt; margin-bottom: 4px; }
+    h2 { font-size: 12pt; margin: 18px 0 6px; border-bottom: 1px solid #ccc; padding-bottom: 3px; }
+    .header-block { margin-bottom: 24px; }
+    .header-block p { line-height: 1.8; font-size: 10.5pt; }
+    .header-block .company { font-size: 14pt; font-weight: bold; margin-bottom: 2px; }
+    .header-block .paystub-ref { margin-top: 8px; border-bottom: 1px solid #999; width: 260px; min-height: 20px; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: 10pt; }
+    th { text-align: left; border-bottom: 2px solid #000; padding: 4px 6px; font-size: 9.5pt; }
+    td { padding: 3px 6px; border-bottom: 1px solid #eee; vertical-align: top; }
+    .text-right { text-align: right; }
+    .summary-table { margin-top: 24px; max-width: 300px; }
+    .summary-table td { border: none; padding: 2px 6px; }
+    .summary-table .total-row td { border-top: 2px solid #000; font-weight: bold; padding-top: 6px; }
+    @media print {
+      body { padding: 0.5in; }
+      @page { margin: 0.5in; }
+      a { color: inherit; text-decoration: none; }
+      .no-print { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+
+{% if payee %}
+  {% set person_name = payee.name %}
+  {% set company_name = payee.company_name %}
+  {% set salary = payee.salary_amount %}
+  {% set sel_tx = payee.tx_splits | selectattr('in_run') | list %}
+  {% set sel_exp = payee.exp_splits | selectattr('in_run') | list %}
+  {% set fee_total = payee.selected_tx_total %}
+  {% set exp_total = payee.selected_exp_total %}
+{% else %}
+  {% set person_name = salary_emp.name %}
+  {% set company_name = salary_emp.company_name %}
+  {% set salary = (salary_emp.run_amount or salary_emp.monthly_salary or 0) %}
+  {% set sel_tx = [] %}
+  {% set sel_exp = [] %}
+  {% set fee_total = 0 %}
+  {% set exp_total = 0 %}
+{% endif %}
+
+<div class="header-block">
+  {% if company_name %}
+  <div class="company">{{ company_name }}</div>
+  {% endif %}
+  <h1>{{ person_name }}</h1>
+  <p>
+    <strong>Run:</strong> {{ run.name }}<br>
+    {% if run.period_from or run.period_to %}
+    <strong>Pay Period:</strong> {{ run.period_from or '?' }} – {{ run.period_to or '?' }}<br>
+    {% endif %}
+    {% if run.pay_date %}
+    <strong>Pay Date:</strong> {{ run.pay_date }}<br>
+    {% endif %}
+  </p>
+  <p style="margin-top:10px"><strong>Paystub Ref:</strong>&nbsp;</p>
+  <div class="paystub-ref">&nbsp;</div>
+</div>
+
+{% if sel_tx %}
+<h2>Transactions</h2>
+<table>
+  <thead>
+    <tr>
+      <th>Job #</th>
+      <th>Insured</th>
+      <th>Check #</th>
+      <th>Date</th>
+      <th>Type</th>
+      <th class="text-right">Split %</th>
+      <th class="text-right">Earned</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for s in sel_tx %}
+    <tr>
+      <td>{{ s.job_number or '—' }}</td>
+      <td>{{ s.insured_name or '—' }}</td>
+      <td>{{ s.check_number or '—' }}</td>
+      <td>{{ s.date or '—' }}</td>
+      <td>{{ s.type or '—' }}</td>
+      <td class="text-right">{{ s.split_pct }}%</td>
+      <td class="text-right">${{ "%.2f" | format(s.earned) }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% if sel_exp %}
+<h2>Expenses</h2>
+<table>
+  <thead>
+    <tr>
+      <th>Job #</th>
+      <th>Insured</th>
+      <th>Date</th>
+      <th>Vendor</th>
+      <th class="text-right">Split %</th>
+      <th class="text-right">WP Share</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for es in sel_exp %}
+    <tr>
+      <td>{{ es.job_number or '—' }}</td>
+      <td>{{ es.insured_name or '—' }}</td>
+      <td>{{ es.date or '—' }}</td>
+      <td>{{ es.vendor or '—' }}</td>
+      <td class="text-right">{{ es.split_pct }}%</td>
+      <td class="text-right">${{ "%.2f" | format(es.owed) }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+<table class="summary-table">
+  <tbody>
+    <tr>
+      <td>Fee Earnings:</td>
+      <td class="text-right">${{ "%.2f" | format(fee_total) }}</td>
+    </tr>
+    <tr>
+      <td>Expenses:</td>
+      <td class="text-right">${{ "%.2f" | format(exp_total) }}</td>
+    </tr>
+    <tr>
+      <td>Base Salary:</td>
+      <td class="text-right">${{ "%.2f" | format(salary) }}</td>
+    </tr>
+    <tr class="total-row">
+      <td>Total:</td>
+      <td class="text-right">${{ "%.2f" | format(fee_total + exp_total + salary) }}</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="no-print" style="margin-top:40px;padding:16px;border-top:1px solid #ccc">
+  <button onclick="window.print()" style="padding:8px 20px;font-size:13px;cursor:pointer">🖨 Print / Save as PDF</button>
+  <button onclick="window.close()" style="padding:8px 16px;margin-left:8px;font-size:13px;cursor:pointer">Close</button>
+</div>
+
+</body>
+</html>

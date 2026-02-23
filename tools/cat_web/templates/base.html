@@ -20,6 +20,8 @@
     <a href="{{ url_for('vendors_list') }}" class="{% if request.endpoint == 'vendors_list' %}active{% endif %}">Vendors</a>
     <a href="{{ url_for('fee_recipients_list') }}" class="{% if request.endpoint == 'fee_recipients_list' %}active{% endif %}">Fee Recipients</a>
     <a href="{{ url_for('site_payroll') }}" class="{% if request.endpoint in ['site_payroll', 'site_payroll_export'] %}active{% endif %}">Payroll</a>
+    <a href="{{ url_for('payroll_runs_list') }}" class="{% if request.endpoint in ['payroll_runs_list','payroll_run_new_form','payroll_run_builder'] %}active{% endif %}">Payroll Runs</a>
+    <a href="{{ url_for('salary_employees_list') }}" class="{% if request.endpoint == 'salary_employees_list' %}active{% endif %}">Salary Staff</a>
     <a href="{{ url_for('import_page') }}" class="{% if request.endpoint in ['import_page', 'import_review'] %}active{% endif %}">Import</a>
     <a href="{{ url_for('global_status') }}" class="{% if request.endpoint == 'global_status' %}active{% endif %}">Status</a>
   </div>

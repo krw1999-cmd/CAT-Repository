@@ -131,7 +131,7 @@
             <td class="num"><strong>{{ row.earned | money }}</strong></td>
             <td>
               {% if row.status == 'paid' %}
-              <span class="status-badge status-released">✓ {{ row.payroll_paid_date or 'Paid' }}</span>
+              <span class="status-badge status-released">✓ Paid{% if row.payroll_paid_date %} {{ row.payroll_paid_date }}{% endif %}</span>
               {% elif row.status == 'partial' %}
               <span class="status-badge status-inv-pending">Partial {{ row.payroll_paid | money }}</span>
               {% else %}
@@ -164,7 +164,13 @@
         <tbody>
           {% for row in payee.pending_rows %}
           <tr class="payroll-row" data-status="n/a">
-            <td><a href="{{ url_for('tx_detail', claim_id=claim.id, tx_id=row.tx_id) }}" class="text-muted">{{ row.check_number or '—' }}</a></td>
+            <td>
+              {% if row.tx_id %}
+              <a href="{{ url_for('tx_detail', claim_id=claim.id, tx_id=row.tx_id) }}" class="text-muted">{{ row.invoice_number or row.check_number or '—' }}</a>
+              {% else %}
+              <span class="text-muted">{{ row.check_number or '—' }}</span>
+              {% endif %}
+            </td>
             <td>{{ row.date or '—' }}</td>
             <td>{{ row.type }}</td>
             <td class="capitalize">{{ row.role }}</td>
@@ -173,11 +179,8 @@
             <td>
               {% if row.pending_type == 'not_received' %}
               <span class="status-badge status-inv-pending">Fee not received</span>
-              {% elif row.invoice_info %}
-              <span class="status-badge status-inv-pending" title="Invoice outstanding">
-                Deferred — #{{ row.invoice_info.invoice_number }}
-                ({{ row.invoice_info.outstanding | money }} {{ row.invoice_info.status }})
-              </span>
+              {% elif row.pending_type == 'fee_invoice' %}
+              <span class="status-badge status-inv-pending">Invoice unpaid</span>
               {% else %}
               <span class="text-muted">Deferred</span>
               {% endif %}
@@ -214,7 +217,7 @@
             <td class="num"><strong>{{ row.owed | money }}</strong></td>
             <td>
               {% if row.status == 'paid' %}
-              <span class="status-badge status-released">✓ {{ row.payroll_paid_date or 'Paid' }}</span>
+              <span class="status-badge status-released">✓ Paid{% if row.payroll_paid_date %} {{ row.payroll_paid_date }}{% endif %}</span>
               {% elif row.status == 'partial' %}
               <span class="status-badge status-inv-pending">Partial {{ row.payroll_paid | money }}</span>
               {% else %}

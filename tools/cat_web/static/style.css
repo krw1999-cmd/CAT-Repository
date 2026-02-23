@@ -678,6 +678,36 @@ input[list] {
   font-weight: 600;
   margin-left: 6px;
 }
+.badge-expense-payee {
+  display: inline-block;
+  font-size: 11px;
+  background: #fee2e2;
+  color: #991b1b;
+  border-radius: 10px;
+  padding: 1px 7px;
+  font-weight: 600;
+  margin-left: 6px;
+}
+.badge-expense-reimburse {
+  display: inline-block;
+  font-size: 11px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  border-radius: 10px;
+  padding: 1px 7px;
+  font-weight: 600;
+  margin-left: 6px;
+}
+.badge-expense-wp-reimburse {
+  display: inline-block;
+  font-size: 11px;
+  background: #ede9fe;
+  color: #6d28d9;
+  border-radius: 10px;
+  padding: 1px 7px;
+  font-weight: 600;
+  margin-left: 6px;
+}
 
 /* ── Import page ──────────────────────────────────────────────────────────── */
 .import-upload-form {
@@ -849,3 +879,7 @@ details[open] .import-check-summary::before { content: "▼"; }
   border-color: #6366f1;
   background: #fff;
 }
+
+/* ===== Payroll Runs ===== */
+.row-in-run  { background: #f0fdf4; }
+.row-other-run { background: #fffbeb; }

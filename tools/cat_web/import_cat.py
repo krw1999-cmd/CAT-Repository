@@ -767,6 +767,8 @@ def _parse_transaction_sheet(ws, name: str, wb=None) -> tuple[dict, list[str]]:
                     continue
                 if role_s in ("role", "title", "splits", "name", "%", "split %", "amount"):
                     continue
+                if "undistributed" in name_s.lower():
+                    continue
 
                 mapped_role = "other"
                 for key, val in ROLE_MAP.items():
@@ -1050,6 +1052,8 @@ def _parse_expense_sheet(ws, name: str) -> tuple[dict, list[str]]:
                 if not role_s and not name_s:
                     continue
                 if role_s in ("role", "title", "splits", "name", "%", "split %", "amount"):
+                    continue
+                if "undistributed" in name_s.lower():
                     continue
                 mapped_role = "other"
                 for key, val in ROLE_MAP.items():

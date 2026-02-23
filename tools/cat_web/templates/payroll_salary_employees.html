@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}Salary Staff{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h2>Salary Staff</h2>
+  <p class="text-muted text-small" style="margin-top:4px">
+    Employees paid a fixed monthly salary (may or may not have fee splits).
+  </p>
+</div>
+
+<section class="section" id="salary-employees-section">
+  <div class="table-wrap">
+    <table class="table table-compact">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Company</th>
+          <th class="text-right">Monthly Salary</th>
+          <th>Linked Fee Recipient</th>
+          <th>Active</th>
+          <th class="actions-col"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for emp in employees %}
+        <tr id="salaryemp-{{ emp.id }}">
+          <td>
+            <form id="salaryemp-form-{{ emp.id }}" style="display:none"
+                  hx-put="{{ url_for('salary_employee_update', emp_id=emp.id) }}"
+                  hx-target="#salary-employees-section"
+                  hx-swap="outerHTML"
+                  hx-select="#salary-employees-section"></form>
+            <input type="text" form="salaryemp-form-{{ emp.id }}" name="name"
+                   value="{{ emp.name }}" class="input-sm edit-field-{{ emp.id }}"
+                   style="display:none" required>
+            <span class="view-val" data-fid="{{ emp.id }}"><strong>{{ emp.name }}</strong></span>
+          </td>
+          <td>
+            <span class="view-val" data-fid="{{ emp.id }}">{{ emp.company_name or '—' }}</span>
+            <input type="text" form="salaryemp-form-{{ emp.id }}" name="company_name"
+                   value="{{ emp.company_name or '' }}" class="input-sm edit-field-{{ emp.id }}"
+                   style="display:none" placeholder="Company/DBA name">
+          </td>
+          <td class="text-right">
+            <span class="view-val" data-fid="{{ emp.id }}">{{ emp.monthly_salary | money }}</span>
+            <input type="number" form="salaryemp-form-{{ emp.id }}" name="monthly_salary"
+                   value="{{ emp.monthly_salary or 0 }}" step="0.01" min="0" class="input-sm edit-field-{{ emp.id }}"
+                   style="display:none;width:100px">
+          </td>
+          <td>
+            <span class="view-val" data-fid="{{ emp.id }}">{{ emp.fee_recipient_name or '—' }}</span>
+            <select form="salaryemp-form-{{ emp.id }}" name="fee_recipient_id"
+                    class="select-sm edit-field-{{ emp.id }}" style="display:none">
+              <option value="">— none —</option>
+              {% for r in recipients %}
+              <option value="{{ r.id }}" {% if r.id == emp.fee_recipient_id %}selected{% endif %}>{{ r.name }}</option>
+              {% endfor %}
+            </select>
+          </td>
+          <td>
+            <span class="view-val" data-fid="{{ emp.id }}">{% if emp.active %}Yes{% else %}No{% endif %}</span>
+            <select form="salaryemp-form-{{ emp.id }}" name="active"
+                    class="select-sm edit-field-{{ emp.id }}" style="display:none">
+              <option value="1" {% if emp.active %}selected{% endif %}>Active</option>
+              <option value="0" {% if not emp.active %}selected{% endif %}>Inactive</option>
+            </select>
+          </td>
+          <td class="actions-col nowrap">
+            <button class="btn-icon view-mode-{{ emp.id }}"
+                    onclick="startEdit({{ emp.id }})">✎</button>
+            <button class="btn-icon view-mode-{{ emp.id }} btn-icon-danger"
+                    hx-delete="{{ url_for('salary_employee_delete', emp_id=emp.id) }}"
+                    hx-target="#salary-employees-section"
+                    hx-swap="outerHTML"
+                    hx-select="#salary-employees-section"
+                    hx-confirm="Delete '{{ emp.name }}'?">✕</button>
+            <button class="btn-icon edit-mode-{{ emp.id }}" style="display:none"
+                    onclick="submitEdit({{ emp.id }})">✓</button>
+            <button class="btn-icon edit-mode-{{ emp.id }}" style="display:none"
+                    onclick="cancelEdit({{ emp.id }})">✕</button>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="text-center text-muted" style="padding:20px">No salary employees yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-header"><h3>Add Salary Employee</h3></div>
+  <form hx-post="{{ url_for('salary_employee_create') }}"
+        hx-target="#salary-employees-section"
+        hx-swap="outerHTML"
+        hx-select="#salary-employees-section"
+        style="max-width:560px">
+    <div class="form-grid-2">
+      <div class="field">
+        <label>Name *</label>
+        <input type="text" name="name" class="input-sm" required placeholder="Full name">
+      </div>
+      <div class="field">
+        <label>Company / DBA</label>
+        <input type="text" name="company_name" class="input-sm" placeholder="Company name (for print headers)">
+      </div>
+      <div class="field">
+        <label>Monthly Salary</label>
+        <input type="number" name="monthly_salary" class="input-sm" step="0.01" min="0" value="0">
+      </div>
+      <div class="field">
+        <label>Linked Fee Recipient</label>
+        <select name="fee_recipient_id" class="select-sm">
+          <option value="">— none (salary-only) —</option>
+          {% for r in recipients %}
+          <option value="{{ r.id }}">{{ r.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <button type="submit" class="btn btn-primary btn-sm" style="margin-top:8px">Add Employee</button>
+  </form>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function startEdit(id) {
+  document.querySelectorAll('.view-val[data-fid="' + id + '"]').forEach(el => el.style.display = 'none');
+  document.querySelectorAll('.edit-field-' + id).forEach(el => el.style.display = '');
+  document.querySelectorAll('.view-mode-' + id).forEach(el => el.style.display = 'none');
+  document.querySelectorAll('.edit-mode-' + id).forEach(el => el.style.display = '');
+}
+function cancelEdit(id) {
+  document.querySelectorAll('.view-val[data-fid="' + id + '"]').forEach(el => el.style.display = '');
+  document.querySelectorAll('.edit-field-' + id).forEach(el => el.style.display = 'none');
+  document.querySelectorAll('.view-mode-' + id).forEach(el => el.style.display = '');
+  document.querySelectorAll('.edit-mode-' + id).forEach(el => el.style.display = 'none');
+}
+function submitEdit(id) {
+  htmx.trigger(document.getElementById('salaryemp-form-' + id), 'submit');
+}
+</script>
+{% endblock %}

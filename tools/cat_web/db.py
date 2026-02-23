@@ -222,6 +222,14 @@ CREATE TABLE IF NOT EXISTS invoice_deferred_links (
     created_at     TEXT NOT NULL
 );
 
+-- Many-to-many: recouped check → deferred-fee transactions
+CREATE TABLE IF NOT EXISTS recouped_deferred_links (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    recouped_tx_id  INTEGER NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+    deferred_tx_id  INTEGER NOT NULL REFERENCES transactions(id),
+    created_at      TEXT NOT NULL
+);
+
 -- Payments from WP or client to the external payee (per expense)
 CREATE TABLE IF NOT EXISTS expense_payments (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -274,6 +282,60 @@ CREATE TABLE IF NOT EXISTS coverage_type_catalog (
     id   INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE
 );
+
+-- Salary-only employees (people who don't have transaction splits)
+-- Also used to add a base salary to fee_recipients who have both
+CREATE TABLE IF NOT EXISTS salary_employees (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    name             TEXT NOT NULL UNIQUE,
+    company_name     TEXT,
+    monthly_salary   REAL NOT NULL DEFAULT 0,
+    fee_recipient_id INTEGER REFERENCES fee_recipients(id),
+    active           INTEGER NOT NULL DEFAULT 1,
+    created_at       TEXT NOT NULL,
+    updated_at       TEXT NOT NULL
+);
+
+-- One record per payroll run (e.g. "January 2026 Payroll")
+CREATE TABLE IF NOT EXISTS payroll_runs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL,
+    period_from TEXT,
+    period_to   TEXT,
+    pay_date    TEXT,
+    status      TEXT NOT NULL DEFAULT 'draft',
+    notes       TEXT,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+
+-- Which transaction_splits are selected for a run
+CREATE TABLE IF NOT EXISTS payroll_run_splits (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id     INTEGER NOT NULL REFERENCES payroll_runs(id) ON DELETE CASCADE,
+    split_id   INTEGER NOT NULL REFERENCES transaction_splits(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL,
+    UNIQUE(run_id, split_id)
+);
+
+-- Which expense_splits are selected for a run
+CREATE TABLE IF NOT EXISTS payroll_run_exp_splits (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id       INTEGER NOT NULL REFERENCES payroll_runs(id) ON DELETE CASCADE,
+    exp_split_id INTEGER NOT NULL REFERENCES expense_splits(id) ON DELETE CASCADE,
+    created_at   TEXT NOT NULL,
+    UNIQUE(run_id, exp_split_id)
+);
+
+-- Per-run salary amounts (can override salary_employees.monthly_salary)
+CREATE TABLE IF NOT EXISTS payroll_run_salaries (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id             INTEGER NOT NULL REFERENCES payroll_runs(id) ON DELETE CASCADE,
+    salary_employee_id INTEGER NOT NULL REFERENCES salary_employees(id) ON DELETE CASCADE,
+    amount             REAL NOT NULL DEFAULT 0,
+    created_at         TEXT NOT NULL,
+    UNIQUE(run_id, salary_employee_id)
+);
 """
 
 # Columns added after initial deploy — safe to run on any existing DB
@@ -313,6 +375,7 @@ _MIGRATIONS = [
     ("expense_splits",     "payroll_paid",             "REAL DEFAULT 0"),
     ("expense_splits",     "payroll_paid_date",        "TEXT"),
     ("claims",             "notes",                   "TEXT"),
+    ("fee_recipients",     "company_name",            "TEXT"),
 ]
 
 _STATUS_NOTES_DDL = """
@@ -1276,10 +1339,11 @@ def get_fee_recipient(recipient_id: int) -> dict | None:
 def create_fee_recipient(data: dict) -> int:
     now = _now()
     cur = get_db().execute(
-        """INSERT INTO fee_recipients (name, default_role, created_at)
-           VALUES (:name, :default_role, :now)""",
+        """INSERT INTO fee_recipients (name, company_name, default_role, created_at)
+           VALUES (:name, :company_name, :default_role, :now)""",
         {
             "name":         data.get("name", "").strip(),
+            "company_name": data.get("company_name", "").strip() or None,
             "default_role": data.get("default_role", "").strip(),
             "now": now,
         },
@@ -1289,9 +1353,10 @@ def create_fee_recipient(data: dict) -> int:
 
 def update_fee_recipient(recipient_id: int, data: dict) -> None:
     get_db().execute(
-        "UPDATE fee_recipients SET name=:name, default_role=:default_role WHERE id=:id",
+        "UPDATE fee_recipients SET name=:name, company_name=:company_name, default_role=:default_role WHERE id=:id",
         {
             "name":         data.get("name", "").strip(),
+            "company_name": data.get("company_name", "").strip() or None,
             "default_role": data.get("default_role", "").strip(),
             "id": recipient_id,
         },
@@ -2150,6 +2215,72 @@ def delete_invoice_deferred_link(link_id: int, invoice_tx_id: int) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Recouped Deferred Links
+# ---------------------------------------------------------------------------
+
+def create_recouped_deferred_link(recouped_tx_id: int, deferred_tx_id: int) -> int:
+    db = get_db()
+    cur = db.execute(
+        "INSERT INTO recouped_deferred_links (recouped_tx_id, deferred_tx_id, created_at) VALUES (?,?,?)",
+        (recouped_tx_id, deferred_tx_id, _now()),
+    )
+    db.commit()
+    return cur.lastrowid
+
+def get_recouped_deferred_links(recouped_tx_id: int) -> list[dict]:
+    """Return linked deferred transactions for a recouped check."""
+    return _rows(get_db(), """
+        SELECT rdl.id, rdl.deferred_tx_id,
+               t.sequence_number, t.type, t.date, t.amount,
+               COALESCE(t.deferred, 0) AS tx_deferred,
+               COALESCE(d.fee_def, 0)  AS disb_deferred,
+               CASE WHEN COALESCE(t.deferred,0) > 0
+                    THEN COALESCE(t.deferred,0)
+                    ELSE COALESCE(d.fee_def,0) END AS deferred
+        FROM recouped_deferred_links rdl
+        JOIN transactions t ON t.id = rdl.deferred_tx_id
+        LEFT JOIN (
+            SELECT transaction_id, SUM(fee_deferred) AS fee_def
+            FROM disbursements GROUP BY transaction_id
+        ) d ON d.transaction_id = t.id
+        WHERE rdl.recouped_tx_id = ?
+        ORDER BY rdl.id
+    """, (recouped_tx_id,))
+
+def update_recouped_deferred_link(link_id: int, deferred_tx_id: int) -> None:
+    db = get_db()
+    db.execute(
+        "UPDATE recouped_deferred_links SET deferred_tx_id=? WHERE id=?",
+        (deferred_tx_id, link_id),
+    )
+    db.commit()
+
+def delete_recouped_deferred_link(lid: int) -> None:
+    db = get_db()
+    db.execute("DELETE FROM recouped_deferred_links WHERE id=?", (lid,))
+    db.commit()
+
+def get_claim_txs_with_deferred(claim_id: int) -> list[dict]:
+    """Return transactions on a claim that have any deferred fee amount."""
+    return _rows(get_db(), """
+        SELECT * FROM (
+            SELECT t.id, t.sequence_number, t.type, t.date, t.amount,
+                   CASE WHEN COALESCE(t.deferred,0) > 0
+                        THEN COALESCE(t.deferred,0)
+                        ELSE COALESCE(d.fee_def,0) END AS deferred
+            FROM transactions t
+            LEFT JOIN (
+                SELECT transaction_id, SUM(fee_deferred) AS fee_def
+                FROM disbursements GROUP BY transaction_id
+            ) d ON d.transaction_id = t.id
+            WHERE t.claim_id = ? AND (t.void IS NULL OR t.void = 0)
+        ) sub
+        WHERE deferred > 0.005
+        ORDER BY date, id
+    """, (claim_id,))
+
+
+# ---------------------------------------------------------------------------
 # Helper for dropdowns
 # ---------------------------------------------------------------------------
 
@@ -2203,22 +2334,6 @@ def _payroll_status(earned: float, paid: float) -> str:
     if paid > 0.005:
         return "partial"
     return "unpaid"
-
-
-def _payroll_fee_collected_for_tx(tx_id: int) -> float:
-    """Return the fee_collected basis for payroll split calculations."""
-    tx = _row(get_db(), "SELECT type, fee_collected, total_collected FROM transactions WHERE id=?", (tx_id,))
-    if not tx:
-        return 0.0
-    tx_type = (tx["type"] or "").lower().strip()
-    if tx_type == "fee invoice":
-        return float(tx["total_collected"] or 0)
-    d = _row(get_db(),
-             "SELECT COALESCE(SUM(fee_collected), 0) AS fc, COUNT(*) AS cnt FROM disbursements WHERE transaction_id=?",
-             (tx_id,))
-    if d and d["cnt"] > 0:
-        return float(d["fc"])
-    return float(tx["fee_collected"] or 0)
 
 
 def _payroll_earned_for_split(split: dict) -> float:
@@ -2331,6 +2446,24 @@ def mark_expense_split_paid_toggle(exp_split_id: int, paid_date: str) -> None:
         mark_expense_splits_paid([exp_split_id], paid_date)
 
 
+def set_split_paid_amount(split_id: int, amount: float) -> None:
+    db = get_db()
+    db.execute(
+        "UPDATE transaction_splits SET payroll_paid=? WHERE id=?",
+        (round(amount, 2), split_id),
+    )
+    db.commit()
+
+
+def set_expense_split_paid_amount(exp_split_id: int, amount: float) -> None:
+    db = get_db()
+    db.execute(
+        "UPDATE expense_splits SET payroll_paid=? WHERE id=?",
+        (round(amount, 2), exp_split_id),
+    )
+    db.commit()
+
+
 def get_claim_historic_assignees(claim_id: int) -> list[dict]:
     """Return per-person date ranges from transaction_splits for this claim."""
     sql = """
@@ -2367,8 +2500,13 @@ def _payroll_basis_for_tx(tx: dict) -> tuple[float, float, float]:
         # Only show recouped as received when fee_collected is also set.
         # "Fee received" confirms the full amount including any recouped portion.
         # When fee_collected=0, recouped stays in pending.
+        #
+        # NOTE: fee_collected on disbursements = fee_owed + fee_recouped (they are
+        # stored as a combined total). _payroll_earned_for_split adds fee_share and
+        # rec_share separately, so we must subtract recouped from collected first to
+        # avoid double-counting the recouped portion.
         if collected > 0:
-            return (collected, recouped, deferred)
+            return (max(0.0, round(collected - recouped, 2)), recouped, deferred)
         return (0.0, 0.0, deferred)
     return (
         float(tx.get("fee_collected") or 0),
@@ -2436,17 +2574,6 @@ def get_claim_payroll_data(claim_id: int) -> dict:
     txs = get_transactions(claim_id)
     payees: dict = {}
 
-    # Pre-compute available check-based recouped pool for this claim.
-    # disburse_fee_recouped on a tx means a previously-deferred fee was collected
-    # via a check (not via invoice payment).  We consume this pool FIFO (by date)
-    # when we encounter deferred txs, so that the deferred tx is NOT shown as
-    # pending — it has already been accounted for in that check's received amount.
-    check_recouped_pool: float = sum(
-        float(tx.get("disburse_fee_recouped") or 0)
-        for tx in txs
-        if not tx.get("void")
-    )
-
     for tx in txs:
         if tx.get("void"):
             continue
@@ -2464,16 +2591,7 @@ def get_claim_payroll_data(claim_id: int) -> dict:
         pending_recouped_basis: float = 0.0
         pending_type: "str | None" = None
 
-        if basis_deferred > 0 and basis_collected == 0 and basis_recouped == 0:
-            tx_recouped = float(tx.get("recouped") or 0)
-            if tx_recouped >= basis_deferred - 0.005:
-                pass  # invoice-recouped — not pending
-            elif check_recouped_pool >= basis_deferred - 0.005:
-                check_recouped_pool -= basis_deferred
-            else:
-                pending_owed_basis = basis_deferred
-                pending_type = "deferred"
-        elif tx.get("has_disbursements"):
+        if tx.get("has_disbursements"):
             fee_owed     = float(tx.get("disburse_fee_owed") or 0)
             fee_deferred = float(tx.get("disburse_fee_deferred") or 0)
             fee_recouped = float(tx.get("disburse_fee_recouped") or 0)
@@ -2485,6 +2603,13 @@ def get_claim_payroll_data(claim_id: int) -> dict:
                 pending_owed_basis = max(0.0, fee_owed_pending)
                 pending_recouped_basis = fee_recouped_pending
                 pending_type = "not_received"
+        elif tx_type == "fee invoice":
+            fee_outstanding = round(
+                float(tx.get("amount") or 0) - float(tx.get("amount_paid") or 0), 2
+            )
+            if fee_outstanding > 0.005:
+                pending_owed_basis = fee_outstanding
+                pending_type = "fee_invoice"
 
         splits = get_splits(tx["id"])
         if not splits and (basis_collected > 0 or basis_recouped > 0 or pending_owed_basis > 0 or pending_recouped_basis > 0):
@@ -2511,6 +2636,7 @@ def get_claim_payroll_data(claim_id: int) -> dict:
                     "name": name,
                     "rows": [], "pending_rows": [], "exp_rows": [],
                     "total_earned": 0.0, "total_paid": 0.0,
+                    "total_deferred": 0.0,
                     "total_exp_owed": 0.0, "total_exp_paid": 0.0,
                 }
 
@@ -2534,6 +2660,7 @@ def get_claim_payroll_data(claim_id: int) -> dict:
                 "split_id": split["id"],
                 "tx_id": tx["id"],
                 "check_number": tx.get("check_number") or "",
+                "invoice_number": tx.get("invoice_number") or "",
                 "date": tx.get("date") or "",
                 "type": tx.get("type") or "",
                 "role": split.get("role") or "",
@@ -2557,13 +2684,8 @@ def get_claim_payroll_data(claim_id: int) -> dict:
                     rec_pend = round(pending_recouped_basis * pct, 2)
                 pending_share = round(owed_pend + rec_pend, 2)
                 if pending_share > 0:
-                    invoice_info = (
-                        _get_deferred_invoice_info(tx["id"])
-                        if pending_type == "deferred" else None
-                    )
                     pending_row = {**row, "deferred": pending_share, "status": "n/a",
-                                   "pending_type": pending_type,
-                                   "invoice_info": invoice_info}
+                                   "pending_type": pending_type}
                     payees[person_key]["pending_rows"].append(pending_row)
 
         # People who appear ONLY in recouped splits (not in regular splits).
@@ -2608,7 +2730,6 @@ def get_claim_payroll_data(claim_id: int) -> dict:
                             "status": "n/a",
                             "deferred": rec_pend,
                             "pending_type": pending_type,
-                            "invoice_info": None,
                         }
                         payees[rkey]["pending_rows"].append(pending_row)
 
@@ -2617,8 +2738,7 @@ def get_claim_payroll_data(claim_id: int) -> dict:
     for exp in expenses:
         exp_splits = get_expense_splits(exp["id"])
         for es in exp_splits:
-            pct = float(es.get("split_pct") or 0) / 100.0
-            share = round(float(exp.get("wp_amount") or 0) * pct, 2)
+            share = round(float(exp.get("wp_amount") or 0) * float(es.get("split_pct") or 0) / 100, 2)
             if share <= 0:
                 continue
             person_key = (es.get("name") or "").strip().lower()
@@ -2630,6 +2750,7 @@ def get_claim_payroll_data(claim_id: int) -> dict:
                     "exp_rows": [],
                     "total_earned": 0.0,
                     "total_paid": 0.0,
+                    "total_deferred": 0.0,
                     "total_exp_owed": 0.0,
                     "total_exp_paid": 0.0,
                 }
@@ -2668,7 +2789,8 @@ def get_site_payroll_data(date_from: str, date_to: str) -> dict:
                COALESCE(d.disburse_fee_collected, 0) AS disburse_fee_collected,
                COALESCE(d.disburse_fee_deferred, 0)  AS disburse_fee_deferred,
                COALESCE(d.disburse_fee_recouped, 0)  AS disburse_fee_recouped,
-               CASE WHEN d.transaction_id IS NOT NULL THEN 1 ELSE 0 END AS has_disbursements
+               CASE WHEN d.transaction_id IS NOT NULL THEN 1 ELSE 0 END AS has_disbursements,
+               COALESCE(ip.amount_paid, 0) AS amount_paid
         FROM transactions t
         JOIN claims c ON c.id = t.claim_id
         LEFT JOIN (
@@ -2680,6 +2802,11 @@ def get_site_payroll_data(date_from: str, date_to: str) -> dict:
             FROM disbursements
             GROUP BY transaction_id
         ) d ON d.transaction_id = t.id
+        LEFT JOIN (
+            SELECT transaction_id, COALESCE(SUM(amount), 0) AS amount_paid
+            FROM invoice_payments
+            GROUP BY transaction_id
+        ) ip ON ip.transaction_id = t.id
         WHERE (t.void IS NULL OR t.void = 0)
           AND LOWER(TRIM(t.type)) != 'escrow'
           AND (t.date = '' OR t.date IS NULL OR t.date BETWEEN ? AND ?)
@@ -2687,16 +2814,6 @@ def get_site_payroll_data(date_from: str, date_to: str) -> dict:
     """
     txs = _rows(db, sql, (date_from, date_to))
     payees: dict = {}
-
-    # Pre-compute per-claim check-recouped pools (FIFO consumption below).
-    # disburse_fee_recouped means a previously-deferred fee arrived via check;
-    # the deferred tx it covers should NOT appear as pending.
-    check_recouped_pools: dict = {}
-    for tx in txs:
-        cid = str(tx.get("claim_id") or tx.get("claim_id_val"))
-        fr = float(tx.get("disburse_fee_recouped") or 0)
-        if fr > 0:
-            check_recouped_pools[cid] = check_recouped_pools.get(cid, 0.0) + fr
 
     def _ensure_payee(key: str, name: str) -> None:
         if key not in payees:
@@ -2714,24 +2831,13 @@ def get_site_payroll_data(date_from: str, date_to: str) -> dict:
 
     for tx in txs:
         basis_collected, basis_recouped, basis_deferred = _payroll_basis_for_tx(tx)
-        cid = str(tx.get("claim_id") or tx.get("claim_id_val"))
+        tx_type_site = (tx.get("type") or "").lower().strip()
 
         pending_owed_basis_site: float = 0.0
         pending_recouped_basis_site: float = 0.0
         pending_type_site: "str | None" = None
 
-        if basis_deferred > 0 and basis_collected == 0 and basis_recouped == 0:
-            tx_recouped = float(tx.get("recouped") or 0)
-            if tx_recouped >= basis_deferred - 0.005:
-                pass  # invoice-recouped, don't show as pending
-            else:
-                avail = check_recouped_pools.get(cid, 0.0)
-                if avail >= basis_deferred - 0.005:
-                    check_recouped_pools[cid] = avail - basis_deferred
-                else:
-                    pending_owed_basis_site = basis_deferred
-                    pending_type_site = "deferred"
-        elif tx.get("has_disbursements"):
+        if tx.get("has_disbursements"):
             fee_owed     = float(tx.get("disburse_fee_owed") or 0)
             fee_deferred = float(tx.get("disburse_fee_deferred") or 0)
             fee_recouped = float(tx.get("disburse_fee_recouped") or 0)
@@ -2741,6 +2847,13 @@ def get_site_payroll_data(date_from: str, date_to: str) -> dict:
                 pending_owed_basis_site = max(0.0, fee_owed_pending)
                 pending_recouped_basis_site = fee_recouped_pending
                 pending_type_site = "not_received"
+        elif tx_type_site == "fee invoice":
+            fee_outstanding = round(
+                float(tx.get("amount") or 0) - float(tx.get("amount_paid") or 0), 2
+            )
+            if fee_outstanding > 0.005:
+                pending_owed_basis_site = fee_outstanding
+                pending_type_site = "fee_invoice"
 
         splits = _rows(db,
                        "SELECT * FROM transaction_splits WHERE transaction_id=? ORDER BY id",
@@ -2785,6 +2898,7 @@ def get_site_payroll_data(date_from: str, date_to: str) -> dict:
                 "claim_number": tx.get("claim_number") or "",
                 "insured_name": tx.get("insured_name") or "",
                 "check_number": tx.get("check_number") or "",
+                "invoice_number": tx.get("invoice_number") or "",
                 "date": tx.get("date") or "",
                 "type": tx.get("type") or "",
                 "role": split.get("role") or "",
@@ -2809,13 +2923,8 @@ def get_site_payroll_data(date_from: str, date_to: str) -> dict:
                     rec_pend = round(pending_recouped_basis_site * pct, 2)
                 pending_share = round(owed_pend + rec_pend, 2)
                 if pending_share > 0:
-                    invoice_info = (
-                        _get_deferred_invoice_info(tx["id"])
-                        if pending_type_site == "deferred" else None
-                    )
                     row = {**base_row, "deferred": pending_share, "status": "n/a",
-                           "pending_type": pending_type_site,
-                           "invoice_info": invoice_info}
+                           "pending_type": pending_type_site}
                     payees[person_key]["pending_rows"].append(row)
                     payees[person_key]["total_deferred"] += pending_share
 
@@ -2872,7 +2981,6 @@ def get_site_payroll_data(date_from: str, date_to: str) -> dict:
                             "deferred": rec_pend,
                             "status": "n/a",
                             "pending_type": pending_type_site,
-                            "invoice_info": None,
                         }
                         payees[rkey]["pending_rows"].append(row)
                         payees[rkey]["total_deferred"] += rec_pend
@@ -2891,8 +2999,7 @@ def get_site_payroll_data(date_from: str, date_to: str) -> dict:
                            "SELECT * FROM expense_splits WHERE expense_id=? ORDER BY id",
                            (exp["id"],))
         for es in exp_splits:
-            pct = float(es.get("split_pct") or 0) / 100.0
-            share = round(float(exp.get("wp_amount") or 0) * pct, 2)
+            share = round(float(exp.get("wp_amount") or 0) * float(es.get("split_pct") or 0) / 100, 2)
             if share <= 0:
                 continue
             person_key = (es.get("name") or "").strip().lower()
@@ -2976,17 +3083,39 @@ def get_global_status() -> dict:
     """)
 
     open_escrow = _rows(db, """
-        SELECT c.id AS claim_id, c.job_number, c.claim_number, c.insured_name,
-               COALESCE(SUM(CASE WHEN LOWER(TRIM(t.type))='escrow'
-                                 THEN t.amount ELSE 0 END), 0) AS total_escrowed,
-               COALESCE(SUM(CASE WHEN LOWER(TRIM(t.type)) IN ('draw','escrow endorsed')
-                                 THEN t.amount ELSE 0 END), 0) AS total_drawn
-        FROM claims c
-        LEFT JOIN transactions t ON t.claim_id = c.id
-            AND (t.void IS NULL OR t.void = 0)
-        GROUP BY c.id
-        HAVING total_escrowed - total_drawn > 0.005
-        ORDER BY c.insured_name
+        WITH escrowed AS (
+            SELECT c.id AS claim_id, c.job_number, c.claim_number, c.insured_name,
+                   COALESCE(SUM(CASE WHEN LOWER(TRIM(t.type))='escrow'
+                                     THEN t.amount ELSE 0 END), 0) AS total_escrowed,
+                   COALESCE(SUM(CASE WHEN LOWER(TRIM(t.type)) IN ('draw','escrow endorsed')
+                                     THEN t.amount ELSE 0 END), 0) AS total_drawn
+            FROM claims c
+            LEFT JOIN transactions t ON t.claim_id = c.id
+                AND (t.void IS NULL OR t.void = 0)
+            GROUP BY c.id
+            HAVING total_escrowed - total_drawn > 0.005
+        )
+        SELECT e.*
+        FROM escrowed e
+        WHERE NOT EXISTS (
+            SELECT 1 FROM recouped_deferred_links rdl
+            JOIN transactions t_rec ON t_rec.id = rdl.recouped_tx_id
+            JOIN transactions t_def ON t_def.id = rdl.deferred_tx_id
+            WHERE t_rec.claim_id = e.claim_id
+              AND (t_rec.void IS NULL OR t_rec.void = 0)
+              AND LOWER(TRIM(t_def.type)) = 'escrow'
+        )
+        AND NOT EXISTS (
+            SELECT 1 FROM invoice_deferred_links idl
+            JOIN transactions t_inv ON t_inv.id = idl.invoice_tx_id
+            JOIN transactions t_def ON t_def.id = idl.deferred_tx_id
+            WHERE t_inv.claim_id = e.claim_id
+              AND LOWER(TRIM(t_inv.type)) = 'fee invoice'
+              AND (t_inv.void IS NULL OR t_inv.void = 0)
+              AND t_inv.total_collected > 0.005
+              AND LOWER(TRIM(t_def.type)) = 'escrow'
+        )
+        ORDER BY e.insured_name
     """)
     for row in open_escrow:
         row["net_in_escrow"] = round(
@@ -3058,6 +3187,19 @@ def get_global_status() -> dict:
         ORDER BY c.insured_name, e.invoice_date, e.id
     """)
 
+    pending_fee_invoices = _rows(db, """
+        SELECT t.id AS tx_id, t.sequence_number, t.invoice_number, t.date,
+               t.amount, COALESCE(t.total_collected, 0) AS total_collected,
+               t.amount - COALESCE(t.total_collected, 0) AS balance_due,
+               c.id AS claim_id, c.insured_name, c.job_number, c.claim_number
+        FROM transactions t
+        JOIN claims c ON c.id = t.claim_id
+        WHERE LOWER(TRIM(t.type)) = 'fee invoice'
+          AND (t.void IS NULL OR t.void = 0)
+          AND t.amount - COALESCE(t.total_collected, 0) > 0.005
+        ORDER BY c.insured_name, t.date, t.id
+    """)
+
     # Attach status notes to each row
     db.executescript(_STATUS_NOTES_DDL)  # ensure table exists on older DBs
     for row in pending_checks:
@@ -3073,11 +3215,22 @@ def get_global_status() -> dict:
                  (row["exp_id"],))
         row["status_notes"] = n["notes"] if n else ""
 
+    # Build adjuster lookup: claim_id -> list of adjuster names
+    adjuster_rows = _rows(db,
+        "SELECT claim_id, name FROM assignees WHERE LOWER(role)='adjuster' ORDER BY name")
+    claim_adjusters: dict = {}
+    for ar in adjuster_rows:
+        claim_adjusters.setdefault(ar["claim_id"], []).append(ar["name"])
+    all_adjusters = sorted({ar["name"] for ar in adjuster_rows})
+
     return {
         "pending_checks": pending_checks,
         "open_escrow": open_escrow,
         "unrecouped_deferred": unrecouped,
         "pending_expenses": pending_expenses,
+        "pending_fee_invoices": pending_fee_invoices,
+        "claim_adjusters": claim_adjusters,
+        "all_adjusters": all_adjusters,
     }
 
 
@@ -3094,3 +3247,382 @@ def set_status_note(entity_type: str, entity_id: int, notes: str) -> None:
         db.execute("DELETE FROM status_notes WHERE entity_type=? AND entity_id=?",
                    (entity_type, entity_id))
     db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Salary Employees
+# ---------------------------------------------------------------------------
+
+def get_salary_employees() -> list[dict]:
+    """Return all active salary employees, ordered by name."""
+    return _rows(get_db(),
+        """SELECT se.*, fr.name AS fee_recipient_name
+           FROM salary_employees se
+           LEFT JOIN fee_recipients fr ON fr.id = se.fee_recipient_id
+           WHERE se.active = 1
+           ORDER BY se.name""")
+
+
+def get_all_salary_employees() -> list[dict]:
+    """Return all salary employees (including inactive), ordered by name."""
+    return _rows(get_db(),
+        """SELECT se.*, fr.name AS fee_recipient_name
+           FROM salary_employees se
+           LEFT JOIN fee_recipients fr ON fr.id = se.fee_recipient_id
+           ORDER BY se.name""")
+
+
+def create_salary_employee(name: str, monthly_salary: float,
+                            company_name: str | None = None,
+                            fee_recipient_id: int | None = None) -> int:
+    db = get_db()
+    now = _now()
+    cur = db.execute(
+        """INSERT INTO salary_employees (name, company_name, monthly_salary, fee_recipient_id,
+                                         active, created_at, updated_at)
+           VALUES (?, ?, ?, ?, 1, ?, ?)""",
+        (name, company_name or None, float(monthly_salary or 0),
+         fee_recipient_id or None, now, now),
+    )
+    db.commit()
+    return cur.lastrowid
+
+
+def update_salary_employee(emp_id: int, data: dict) -> None:
+    db = get_db()
+    db.execute(
+        """UPDATE salary_employees
+           SET name=?, company_name=?, monthly_salary=?, fee_recipient_id=?,
+               active=?, updated_at=?
+           WHERE id=?""",
+        (data.get("name"), data.get("company_name") or None,
+         float(data.get("monthly_salary") or 0),
+         data.get("fee_recipient_id") or None,
+         1 if data.get("active", True) else 0,
+         _now(), emp_id),
+    )
+    db.commit()
+
+
+def delete_salary_employee(emp_id: int) -> None:
+    db = get_db()
+    db.execute("DELETE FROM salary_employees WHERE id=?", (emp_id,))
+    db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Payroll Runs
+# ---------------------------------------------------------------------------
+
+def get_payroll_runs() -> list[dict]:
+    """Return all payroll runs newest first, with split counts."""
+    return _rows(get_db(), """
+        SELECT pr.*,
+               (SELECT COUNT(*) FROM payroll_run_splits WHERE run_id=pr.id) AS split_count,
+               (SELECT COUNT(*) FROM payroll_run_exp_splits WHERE run_id=pr.id) AS exp_split_count,
+               (SELECT COUNT(*) FROM payroll_run_salaries WHERE run_id=pr.id) AS salary_count
+        FROM payroll_runs pr
+        ORDER BY pr.id DESC
+    """)
+
+
+def get_payroll_run(run_id: int) -> "dict | None":
+    row = _row(get_db(), "SELECT * FROM payroll_runs WHERE id=?", (run_id,))
+    return dict(row) if row else None
+
+
+def create_payroll_run(name: str, period_from: str, period_to: str,
+                        pay_date: str) -> int:
+    db = get_db()
+    now = _now()
+    cur = db.execute(
+        """INSERT INTO payroll_runs (name, period_from, period_to, pay_date,
+                                     status, created_at, updated_at)
+           VALUES (?, ?, ?, ?, 'draft', ?, ?)""",
+        (name, period_from or None, period_to or None,
+         pay_date or None, now, now),
+    )
+    db.commit()
+    return cur.lastrowid
+
+
+def update_payroll_run(run_id: int, data: dict) -> None:
+    db = get_db()
+    db.execute(
+        """UPDATE payroll_runs
+           SET name=?, period_from=?, period_to=?, pay_date=?,
+               status=?, notes=?, updated_at=?
+           WHERE id=?""",
+        (data.get("name"), data.get("period_from") or None,
+         data.get("period_to") or None, data.get("pay_date") or None,
+         data.get("status", "draft"), data.get("notes") or None,
+         _now(), run_id),
+    )
+    db.commit()
+
+
+def delete_payroll_run(run_id: int) -> None:
+    db = get_db()
+    db.execute("DELETE FROM payroll_runs WHERE id=?", (run_id,))
+    db.commit()
+
+
+def toggle_split_in_run(run_id: int, split_id: int) -> bool:
+    """Add or remove a tx split from a run. Returns new in_run state."""
+    db = get_db()
+    existing = _row(db, "SELECT id FROM payroll_run_splits WHERE run_id=? AND split_id=?",
+                    (run_id, split_id))
+    if existing:
+        db.execute("DELETE FROM payroll_run_splits WHERE run_id=? AND split_id=?",
+                   (run_id, split_id))
+        db.commit()
+        return False
+    else:
+        db.execute("INSERT INTO payroll_run_splits (run_id, split_id, created_at) VALUES (?,?,?)",
+                   (run_id, split_id, _now()))
+        db.commit()
+        return True
+
+
+def toggle_exp_split_in_run(run_id: int, exp_split_id: int) -> bool:
+    """Add or remove an expense split from a run. Returns new in_run state."""
+    db = get_db()
+    existing = _row(db,
+        "SELECT id FROM payroll_run_exp_splits WHERE run_id=? AND exp_split_id=?",
+        (run_id, exp_split_id))
+    if existing:
+        db.execute(
+            "DELETE FROM payroll_run_exp_splits WHERE run_id=? AND exp_split_id=?",
+            (run_id, exp_split_id))
+        db.commit()
+        return False
+    else:
+        db.execute(
+            "INSERT INTO payroll_run_exp_splits (run_id, exp_split_id, created_at) VALUES (?,?,?)",
+            (run_id, exp_split_id, _now()))
+        db.commit()
+        return True
+
+
+def set_run_salary_override(run_id: int, salary_employee_id: int,
+                             amount: float) -> None:
+    db = get_db()
+    now = _now()
+    db.execute(
+        """INSERT INTO payroll_run_salaries (run_id, salary_employee_id, amount, created_at)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(run_id, salary_employee_id)
+           DO UPDATE SET amount=excluded.amount""",
+        (run_id, salary_employee_id, float(amount or 0), now),
+    )
+    db.commit()
+
+
+def mark_run_paid(run_id: int, pay_date: str) -> None:
+    """Mark all splits in a run as paid and flip status to 'paid'."""
+    db = get_db()
+
+    # Mark transaction splits
+    split_rows = _rows(db,
+        "SELECT split_id FROM payroll_run_splits WHERE run_id=?", (run_id,))
+    for r in split_rows:
+        sid = r["split_id"]
+        split = _row(db, "SELECT * FROM transaction_splits WHERE id=?", (sid,))
+        if not split:
+            continue
+        earned = _payroll_earned_for_split(dict(split))
+        db.execute(
+            "UPDATE transaction_splits SET payroll_paid=?, payroll_paid_date=? WHERE id=?",
+            (earned, pay_date, sid),
+        )
+
+    # Mark expense splits
+    exp_split_rows = _rows(db,
+        "SELECT exp_split_id FROM payroll_run_exp_splits WHERE run_id=?", (run_id,))
+    for r in exp_split_rows:
+        sid = r["exp_split_id"]
+        es = _row(db, "SELECT * FROM expense_splits WHERE id=?", (sid,))
+        if not es:
+            continue
+        exp = _row(db, "SELECT wp_amount FROM expenses WHERE id=?", (es["expense_id"],))
+        if not exp:
+            continue
+        earned = round(float(exp["wp_amount"] or 0) * float(es["split_pct"] or 0) / 100, 2)
+        db.execute(
+            "UPDATE expense_splits SET payroll_paid=?, payroll_paid_date=? WHERE id=?",
+            (earned, pay_date, sid),
+        )
+
+    db.execute(
+        "UPDATE payroll_runs SET status='paid', pay_date=?, updated_at=? WHERE id=?",
+        (pay_date or None, _now(), run_id),
+    )
+    db.commit()
+
+
+def get_run_builder_data(run_id: int) -> dict:
+    """Return everything needed to render the payroll run builder page."""
+    db = get_db()
+    run = get_payroll_run(run_id)
+    if not run:
+        return {}
+
+    # Salary employees with override amounts for this run
+    sal_emps = _rows(db, """
+        SELECT se.*, COALESCE(prs.amount, se.monthly_salary) AS run_amount,
+               prs.amount AS override_amount, fr.name AS fee_recipient_name
+        FROM salary_employees se
+        LEFT JOIN payroll_run_salaries prs ON prs.run_id=? AND prs.salary_employee_id=se.id
+        LEFT JOIN fee_recipients fr ON fr.id = se.fee_recipient_id
+        WHERE se.active = 1
+        ORDER BY se.name
+    """, (run_id,))
+
+    # Build set of split_ids already in this run and in other runs
+    in_run_splits = {r["split_id"] for r in _rows(db,
+        "SELECT split_id FROM payroll_run_splits WHERE run_id=?", (run_id,))}
+    in_run_exp_splits = {r["exp_split_id"] for r in _rows(db,
+        "SELECT exp_split_id FROM payroll_run_exp_splits WHERE run_id=?", (run_id,))}
+
+    # Other run membership for tx splits
+    other_run_splits: dict = {}  # split_id -> run_name
+    for r in _rows(db, """
+        SELECT prs.split_id, pr.name AS run_name
+        FROM payroll_run_splits prs
+        JOIN payroll_runs pr ON pr.id = prs.run_id
+        WHERE prs.run_id != ?
+    """, (run_id,)):
+        other_run_splits[r["split_id"]] = r["run_name"]
+
+    other_run_exp_splits: dict = {}  # exp_split_id -> run_name
+    for r in _rows(db, """
+        SELECT pres.exp_split_id, pr.name AS run_name
+        FROM payroll_run_exp_splits pres
+        JOIN payroll_runs pr ON pr.id = pres.run_id
+        WHERE pres.run_id != ?
+    """, (run_id,)):
+        other_run_exp_splits[r["exp_split_id"]] = r["run_name"]
+
+    # Get all fee_recipients with payroll splits (paid or unpaid)
+    # We show ALL unpaid splits for the builder
+    fr_rows = _rows(db, """
+        SELECT DISTINCT fr.id, fr.name, COALESCE(fr.company_name, '') AS company_name
+        FROM fee_recipients fr
+        JOIN transaction_splits ts ON ts.recipient_id = fr.id
+        JOIN transactions t ON t.id = ts.transaction_id
+        WHERE (t.void IS NULL OR t.void = 0)
+          AND LOWER(TRIM(t.type)) != 'escrow'
+          AND (ts.payroll_paid IS NULL OR ts.payroll_paid < 0.005)
+        UNION
+        SELECT DISTINCT fr.id, fr.name, COALESCE(fr.company_name, '') AS company_name
+        FROM fee_recipients fr
+        JOIN expense_splits es ON es.recipient_id = fr.id
+        WHERE (es.payroll_paid IS NULL OR es.payroll_paid < 0.005)
+        ORDER BY fr.name
+    """)
+
+    # Map fee_recipient_id -> salary_employee info
+    fr_salary_map: dict = {}
+    for se in sal_emps:
+        if se.get("fee_recipient_id"):
+            fr_salary_map[se["fee_recipient_id"]] = se
+
+    payees = []
+    for fr in fr_rows:
+        frid = fr["id"]
+        # tx splits (unpaid, non-void, non-escrow)
+        tx_splits_raw = _rows(db, """
+            SELECT ts.id AS split_id, ts.transaction_id, ts.split_pct, ts.role, ts.name,
+                   ts.payroll_paid, ts.payroll_paid_date, ts.recipient_id,
+                   t.id AS tx_id, t.date, t.type, t.check_number,
+                   c.id AS claim_id, c.job_number, c.insured_name
+            FROM transaction_splits ts
+            JOIN transactions t ON t.id = ts.transaction_id
+            JOIN claims c ON c.id = t.claim_id
+            WHERE ts.recipient_id = ?
+              AND (t.void IS NULL OR t.void = 0)
+              AND LOWER(TRIM(t.type)) != 'escrow'
+              AND (ts.payroll_paid IS NULL OR ts.payroll_paid < 0.005)
+            ORDER BY t.date DESC, t.id DESC
+        """, (frid,))
+
+        tx_splits = []
+        selected_tx_total = 0.0
+        for s in tx_splits_raw:
+            sid = s["split_id"]
+            in_run = sid in in_run_splits
+            in_other = sid in other_run_splits and not in_run
+            earned = _payroll_earned_for_split(dict(s))
+            tx_splits.append({
+                "split_id": sid,
+                "in_run": in_run,
+                "in_other_run": in_other,
+                "other_run_name": other_run_splits.get(sid) if in_other else None,
+                "job_number": s.get("job_number") or "",
+                "insured_name": s.get("insured_name") or "",
+                "claim_id": s.get("claim_id"),
+                "check_number": s.get("check_number") or "",
+                "date": s.get("date") or "",
+                "type": s.get("type") or "",
+                "role": s.get("role") or "",
+                "split_pct": s.get("split_pct") or 0,
+                "earned": earned,
+            })
+            if in_run:
+                selected_tx_total += earned
+
+        # expense splits (unpaid)
+        exp_splits_raw = _rows(db, """
+            SELECT es.id AS exp_split_id, es.split_pct, es.role, es.name,
+                   es.payroll_paid,
+                   e.id AS exp_id, e.invoice_date, e.payee_name, e.wp_amount,
+                   c.id AS claim_id, c.job_number, c.insured_name
+            FROM expense_splits es
+            JOIN expenses e ON e.id = es.expense_id
+            JOIN claims c ON c.id = e.claim_id
+            WHERE es.recipient_id = ?
+              AND (es.payroll_paid IS NULL OR es.payroll_paid < 0.005)
+            ORDER BY e.invoice_date DESC, e.id DESC
+        """, (frid,))
+
+        exp_splits = []
+        selected_exp_total = 0.0
+        for es in exp_splits_raw:
+            esid = es["exp_split_id"]
+            in_run = esid in in_run_exp_splits
+            in_other = esid in other_run_exp_splits and not in_run
+            owed = round(float(es.get("wp_amount") or 0) * float(es.get("split_pct") or 0) / 100, 2)
+            exp_splits.append({
+                "exp_split_id": esid,
+                "in_run": in_run,
+                "in_other_run": in_other,
+                "other_run_name": other_run_exp_splits.get(esid) if in_other else None,
+                "job_number": es.get("job_number") or "",
+                "insured_name": es.get("insured_name") or "",
+                "date": es.get("invoice_date") or "",
+                "vendor": es.get("payee_name") or "",
+                "role": es.get("role") or "",
+                "split_pct": es.get("split_pct") or 0,
+                "owed": owed,
+            })
+            if in_run:
+                selected_exp_total += owed
+
+        sal_info = fr_salary_map.get(frid, {})
+        payees.append({
+            "name": fr["name"],
+            "company_name": fr.get("company_name") or "",
+            "fee_recipient_id": frid,
+            "salary_amount": float(sal_info.get("run_amount") or 0),
+            "salary_employee_id": sal_info.get("id"),
+            "tx_splits": tx_splits,
+            "exp_splits": exp_splits,
+            "selected_tx_total": round(selected_tx_total, 2),
+            "selected_exp_total": round(selected_exp_total, 2),
+        })
+
+    return {
+        "run": run,
+        "salary_employees": sal_emps,
+        "payees": payees,
+    }
