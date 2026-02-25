@@ -41,6 +41,7 @@
         <th>Fee Rcvd</th>
         <th>Client Rcvd</th>
         <th>Notes</th>
+        <th>Follow-up</th>
         <th></th>
       </tr>
     </thead>
@@ -75,6 +76,11 @@
           {% include "partials/_status_note.html" %}
         </td>
         <td>
+          {% set follow_up_date = ck.follow_up_date %}
+          {% set save_url = url_for('status_tx_followup', tx_id=ck.tx_id) %}
+          {% include "partials/_status_followup.html" %}
+        </td>
+        <td>
           <a href="{{ url_for('tx_detail', claim_id=ck.claim_id, tx_id=ck.tx_id) }}"
              class="btn btn-ghost btn-sm">View →</a>
         </td>
@@ -106,6 +112,7 @@
         <th class="num-col">Invoice Amt</th>
         <th class="num-col">Collected</th>
         <th class="num-col">Balance Due</th>
+        <th>Follow-up</th>
         <th></th>
       </tr>
     </thead>
@@ -120,6 +127,11 @@
         <td class="num-col">{{ inv.total_collected | money }}</td>
         <td class="num-col"><strong>{{ inv.balance_due | money }}</strong></td>
         <td>
+          {% set follow_up_date = inv.follow_up_date %}
+          {% set save_url = url_for('status_tx_followup', tx_id=inv.tx_id) %}
+          {% include "partials/_status_followup.html" %}
+        </td>
+        <td>
           <a href="{{ url_for('tx_detail', claim_id=inv.claim_id, tx_id=inv.tx_id) }}"
              class="btn btn-ghost btn-sm">View →</a>
         </td>
@@ -132,7 +144,60 @@
   {% endif %}
 </section>
 
-{# ── 3. Open Escrow ───────────────────────────────────────────────────────── #}
+{# ── 3. Vendor Fee Invoices ────────────────────────────────────────────────── #}
+<section class="section" style="margin-bottom:32px">
+  <h3 style="margin-bottom:12px">
+    Vendor Fee Invoices
+    {% if vendor_fee_invoices %}
+    <span class="badge badge-unpaid-inv">{{ vendor_fee_invoices|length }}</span>
+    {% endif %}
+  </h3>
+  {% if vendor_fee_invoices %}
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Vendor</th>
+        <th>Insured</th>
+        <th>Job #</th>
+        <th>Invoice #</th>
+        <th>Date</th>
+        <th class="num-col">Invoice Amt</th>
+        <th class="num-col">Collected</th>
+        <th class="num-col">Balance Due</th>
+        <th>Follow-up</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for inv in vendor_fee_invoices %}
+      <tr data-adjuster="{{ claim_adjusters.get(inv.claim_id, [])|join('|') }}">
+        <td><strong>{{ inv.vendor_name or '—' }}</strong></td>
+        <td>{{ inv.insured_name }}</td>
+        <td>{{ inv.job_number or '—' }}</td>
+        <td>{{ inv.invoice_number or '—' }}</td>
+        <td>{{ inv.date or '—' }}</td>
+        <td class="num-col">{{ inv.amount | money }}</td>
+        <td class="num-col">{{ inv.total_collected | money }}</td>
+        <td class="num-col"><strong>{{ inv.balance_due | money }}</strong></td>
+        <td>
+          {% set follow_up_date = inv.follow_up_date %}
+          {% set save_url = url_for('status_tx_followup', tx_id=inv.tx_id) %}
+          {% include "partials/_status_followup.html" %}
+        </td>
+        <td>
+          <a href="{{ url_for('tx_detail', claim_id=inv.claim_id, tx_id=inv.tx_id) }}"
+             class="btn btn-ghost btn-sm">View →</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="text-muted">No pending vendor fee invoices.</p>
+  {% endif %}
+</section>
+
+{# ── 4. Open Escrow ───────────────────────────────────────────────────────── #}
 <section class="section" style="margin-bottom:32px">
   <h3 style="margin-bottom:12px">
     Money in Escrow
@@ -151,6 +216,7 @@
         <th class="num-col">Drawn</th>
         <th class="num-col">Net in Escrow</th>
         <th>Notes</th>
+        <th>Follow-up</th>
         <th></th>
       </tr>
     </thead>
@@ -169,6 +235,11 @@
           {% include "partials/_status_note.html" %}
         </td>
         <td>
+          {% set follow_up_date = row.follow_up_date %}
+          {% set save_url = url_for('status_claim_followup', claim_id=row.claim_id) %}
+          {% include "partials/_status_followup.html" %}
+        </td>
+        <td>
           <a href="{{ url_for('claim_detail', claim_id=row.claim_id) }}"
              class="btn btn-ghost btn-sm">View →</a>
         </td>
@@ -181,7 +252,7 @@
   {% endif %}
 </section>
 
-{# ── 4. Unrecouped Deferred Fees ──────────────────────────────────────────── #}
+{# ── 5. Unrecouped Deferred Fees ──────────────────────────────────────────── #}
 <section class="section" style="margin-bottom:32px">
   <h3 style="margin-bottom:12px">
     Unrecouped Deferred Fees
@@ -199,6 +270,7 @@
         <th class="num-col">Deferred</th>
         <th class="num-col">Recouped</th>
         <th class="num-col">Outstanding</th>
+        <th>Follow-up</th>
         <th></th>
       </tr>
     </thead>
@@ -212,6 +284,11 @@
         <td class="num-col">{{ row.total_recouped | money }}</td>
         <td class="num-col"><strong>{{ row.unrecouped | money }}</strong></td>
         <td>
+          {% set follow_up_date = row.follow_up_date %}
+          {% set save_url = url_for('status_claim_followup', claim_id=row.claim_id) %}
+          {% include "partials/_status_followup.html" %}
+        </td>
+        <td>
           <a href="{{ url_for('claim_detail', claim_id=row.claim_id) }}"
              class="btn btn-ghost btn-sm">View →</a>
         </td>
@@ -224,7 +301,60 @@
   {% endif %}
 </section>
 
-{# ── 5. Pending Expenses ───────────────────────────────────────────────────── #}
+{# ── 6. Vendor-linked Deferred Fees ───────────────────────────────────────── #}
+<section class="section" style="margin-bottom:32px">
+  <h3 style="margin-bottom:12px">
+    Vendor-linked Deferred Fees
+    {% if vendor_deferred %}
+    <span class="badge badge-unpaid-inv">{{ vendor_deferred|length }}</span>
+    {% endif %}
+  </h3>
+  {% if vendor_deferred %}
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Vendor</th>
+        <th>Insured</th>
+        <th>Job #</th>
+        <th>Check #</th>
+        <th>Date</th>
+        <th class="num-col">Deferred</th>
+        <th class="num-col">Recouped</th>
+        <th class="num-col">Outstanding</th>
+        <th>Follow-up</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in vendor_deferred %}
+      <tr data-adjuster="{{ claim_adjusters.get(row.claim_id, [])|join('|') }}">
+        <td><strong>{{ row.vendor_name }}</strong></td>
+        <td>{{ row.insured_name }}</td>
+        <td>{{ row.job_number or '—' }}</td>
+        <td>{{ row.check_number or '—' }}</td>
+        <td>{{ row.check_date or '—' }}</td>
+        <td class="num-col">{{ row.fee_deferred | money }}</td>
+        <td class="num-col">{{ row.fee_recouped | money }}</td>
+        <td class="num-col"><strong>{{ row.outstanding | money }}</strong></td>
+        <td>
+          {% set follow_up_date = row.follow_up_date %}
+          {% set save_url = url_for('status_claim_followup', claim_id=row.claim_id) %}
+          {% include "partials/_status_followup.html" %}
+        </td>
+        <td>
+          <a href="{{ url_for('claim_detail', claim_id=row.claim_id) }}"
+             class="btn btn-ghost btn-sm">View →</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="text-muted">No vendor-linked deferred fees.</p>
+  {% endif %}
+</section>
+
+{# ── 7. Pending Expenses ───────────────────────────────────────────────────── #}
 <section class="section">
   <h3 style="margin-bottom:12px">
     Pending Expenses
@@ -245,6 +375,7 @@
         <th class="num-col" style="width:90px">Invoice</th>
         <th>Owed To</th>
         <th style="width:200px">Notes</th>
+        <th>Follow-up</th>
         <th style="width:60px"></th>
       </tr>
     </thead>
@@ -275,6 +406,11 @@
           {% include "partials/_status_note.html" %}
         </td>
         <td>
+          {% set follow_up_date = exp.follow_up_date %}
+          {% set save_url = url_for('status_expense_followup', exp_id=exp.exp_id) %}
+          {% include "partials/_status_followup.html" %}
+        </td>
+        <td>
           <a href="{{ url_for('claim_detail', claim_id=exp.claim_id) }}"
              class="btn btn-ghost btn-sm">View →</a>
         </td>
@@ -288,6 +424,43 @@
 </section>
 
 <script>
+(function colorFollowUpDates() {
+  const today = new Date().toISOString().slice(0, 10);
+  document.querySelectorAll('.followup-date-input').forEach(function(inp) {
+    const v = inp.value;
+    if (!v) return;
+    if (v < today) {
+      inp.style.background = '#fde8e8';
+      inp.style.borderColor = '#e53e3e';
+      inp.style.color = '#c53030';
+    } else if (v === today) {
+      inp.style.background = '#fefcbf';
+      inp.style.borderColor = '#d69e2e';
+      inp.style.color = '#744210';
+    }
+  });
+})();
+
+document.addEventListener('htmx:afterSwap', function() {
+  const today = new Date().toISOString().slice(0, 10);
+  document.querySelectorAll('.followup-date-input').forEach(function(inp) {
+    inp.style.background = '';
+    inp.style.borderColor = '';
+    inp.style.color = '';
+    const v = inp.value;
+    if (!v) return;
+    if (v < today) {
+      inp.style.background = '#fde8e8';
+      inp.style.borderColor = '#e53e3e';
+      inp.style.color = '#c53030';
+    } else if (v === today) {
+      inp.style.background = '#fefcbf';
+      inp.style.borderColor = '#d69e2e';
+      inp.style.color = '#744210';
+    }
+  });
+});
+
 function applyAdjusterFilter() {
   const adjuster = document.getElementById('filter-adjuster').value;
   document.querySelectorAll('tr[data-adjuster]').forEach(row => {

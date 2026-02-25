@@ -376,6 +376,11 @@ _MIGRATIONS = [
     ("expense_splits",     "payroll_paid_date",        "TEXT"),
     ("claims",             "notes",                   "TEXT"),
     ("fee_recipients",     "company_name",            "TEXT"),
+    ("transactions",       "follow_up_date",          "TEXT"),
+    ("claims",             "follow_up_date",          "TEXT"),
+    ("expenses",           "follow_up_date",          "TEXT"),
+    ("fee_recipients",     "payroll_visible",         "INTEGER NOT NULL DEFAULT 1"),
+    ("expense_payments",   "linked_tx_id",            "INTEGER REFERENCES transactions(id)"),
 ]
 
 _STATUS_NOTES_DDL = """
@@ -575,6 +580,7 @@ def create_claim(data: dict) -> int:
                    :now, :now)""",
         {
             **data,
+            "notes":               data.get("notes") or None,
             "mortgage_company":    data.get("mortgage_company") or None,
             "proc_method_carrier": data.get("proc_method_carrier") or None,
             "proc_method_draw":    data.get("proc_method_draw") or None,
@@ -1290,6 +1296,107 @@ def get_vendor(vendor_id: int) -> dict | None:
     row = _row(get_db(), "SELECT * FROM vendors WHERE id = ?", (vendor_id,))
     return dict(row) if row else None
 
+
+def get_vendor_claims(vendor_id: int) -> list[dict]:
+    """Return per-claim totals for a single vendor across all claims."""
+    db = get_db()
+
+    check_rows = _rows(db, """
+        SELECT t.claim_id,
+               SUM(d.amount) AS check_amount,
+               SUM(CASE WHEN LOWER(TRIM(t.type)) IN ('carrier','draw','escrow endorsed')
+                        THEN d.amount ELSE 0 END) AS released_amount
+        FROM disbursements d
+        JOIN transactions t ON t.id = d.transaction_id
+        WHERE d.vendor_id = ?
+          AND d.recipient_type = 'vendor'
+          AND (t.void IS NULL OR t.void = 0)
+        GROUP BY t.claim_id
+    """, (vendor_id,))
+
+    fee_rows = _rows(db, """
+        WITH tx_def AS (
+            SELECT transaction_id, SUM(fee_deferred) AS total_deferred
+            FROM disbursements WHERE fee_deferred > 0 GROUP BY transaction_id
+        )
+        SELECT t.claim_id,
+               COALESCE(SUM(d.fee_owed), 0) AS fee_owed,
+               COALESCE(SUM(d.fee_deferred), 0) AS fee_deferred,
+               COALESCE(SUM(
+                   CASE WHEN d.fee_recouped > 0 THEN d.fee_recouped
+                        WHEN d.fee_deferred > 0 AND COALESCE(td.total_deferred, 0) > 0
+                             THEN t.recouped * d.fee_deferred / td.total_deferred
+                        ELSE 0 END
+               ), 0) AS fee_recouped
+        FROM disbursements d
+        JOIN transactions t ON t.id = d.transaction_id
+        LEFT JOIN tx_def td ON td.transaction_id = d.transaction_id
+        WHERE d.vendor_id = ?
+          AND d.recipient_type = 'vendor'
+          AND (t.void IS NULL OR t.void = 0)
+        GROUP BY t.claim_id
+    """, (vendor_id,))
+
+    exp_rows = _rows(db, """
+        SELECT e.claim_id,
+               COALESCE(SUM(e.invoice_amount), 0) AS expense_invoice,
+               COALESCE(SUM(e.wp_amount),      0) AS wp_amount,
+               COALESCE(SUM(e.client_amount),  0) AS client_amount
+        FROM expenses e
+        WHERE e.vendor_id = ?
+        GROUP BY e.claim_id
+    """, (vendor_id,))
+
+    pay_rows = _rows(db, """
+        SELECT e.claim_id,
+               COALESCE(SUM(CASE WHEN ep.paid_by='wp'     THEN ep.amount ELSE 0 END), 0) AS wp_paid,
+               COALESCE(SUM(CASE WHEN ep.paid_by='client' THEN ep.amount ELSE 0 END), 0) AS client_paid
+        FROM expenses e
+        JOIN expense_payments ep ON ep.expense_id = e.id
+        WHERE e.vendor_id = ?
+        GROUP BY e.claim_id
+    """, (vendor_id,))
+
+    claims_map   = {c["id"]: c for c in _rows(db, "SELECT id, insured_name, job_number FROM claims")}
+    check_by_c   = {r["claim_id"]: r for r in check_rows}
+    fee_by_c     = {r["claim_id"]: r for r in fee_rows}
+    exp_by_c     = {r["claim_id"]: r for r in exp_rows}
+    pay_by_c     = {r["claim_id"]: r for r in pay_rows}
+
+    all_claim_ids = set(check_by_c.keys()) | set(exp_by_c.keys())
+    rows = []
+    for cid in sorted(all_claim_ids):
+        claim = claims_map.get(cid, {})
+        ci  = check_by_c.get(cid, {})
+        fi  = fee_by_c.get(cid, {})
+        ei  = exp_by_c.get(cid, {})
+        pi  = pay_by_c.get(cid, {})
+
+        released_amount = _f(ci.get("released_amount"))
+        check_amount    = _f(ci.get("check_amount"))
+        in_escrow       = max(0.0, check_amount - released_amount)
+        fee_taken       = max(0.0, _f(fi.get("fee_owed")) - _f(fi.get("fee_deferred")) + _f(fi.get("fee_recouped")))
+        expense_invoice = _f(ei.get("expense_invoice"))
+        wp_paid         = _f(pi.get("wp_paid"))
+        client_paid     = _f(pi.get("client_paid"))
+        outstanding     = max(0.0, expense_invoice - wp_paid - client_paid)
+
+        rows.append({
+            "claim_id":        cid,
+            "insured_name":    claim.get("insured_name", f"Claim #{cid}"),
+            "job_number":      claim.get("job_number") or "",
+            "released_amount": released_amount,
+            "in_escrow":       in_escrow,
+            "fee_taken":       fee_taken,
+            "expense_invoice": expense_invoice,
+            "wp_paid":         wp_paid,
+            "client_paid":     client_paid,
+            "outstanding":     outstanding,
+        })
+    rows.sort(key=lambda r: r["insured_name"].lower())
+    return rows
+
+
 def create_vendor(data: dict) -> int:
     now = _now()
     cur = get_db().execute(
@@ -1353,12 +1460,13 @@ def create_fee_recipient(data: dict) -> int:
 
 def update_fee_recipient(recipient_id: int, data: dict) -> None:
     get_db().execute(
-        "UPDATE fee_recipients SET name=:name, company_name=:company_name, default_role=:default_role WHERE id=:id",
+        "UPDATE fee_recipients SET name=:name, company_name=:company_name, default_role=:default_role, payroll_visible=:payroll_visible WHERE id=:id",
         {
-            "name":         data.get("name", "").strip(),
-            "company_name": data.get("company_name", "").strip() or None,
-            "default_role": data.get("default_role", "").strip(),
-            "id": recipient_id,
+            "name":            data.get("name", "").strip(),
+            "company_name":    data.get("company_name", "").strip() or None,
+            "default_role":    data.get("default_role", "").strip(),
+            "payroll_visible": 1 if str(data.get("payroll_visible", "0")) == "1" else 0,
+            "id":              recipient_id,
         },
     )
     get_db().commit()
@@ -1822,16 +1930,22 @@ def delete_expense(exp_id: int) -> None:
 # ---------------------------------------------------------------------------
 
 def get_expense_payments(expense_id: int) -> list[dict]:
-    return _rows(get_db(),
-                 "SELECT * FROM expense_payments WHERE expense_id = ? ORDER BY date, id",
-                 (expense_id,))
+    return _rows(get_db(), """
+        SELECT ep.*,
+               t.sequence_number AS linked_tx_seq,
+               t.check_number    AS linked_tx_check_number
+        FROM expense_payments ep
+        LEFT JOIN transactions t ON t.id = ep.linked_tx_id
+        WHERE ep.expense_id = ?
+        ORDER BY ep.date, ep.id
+    """, (expense_id,))
 
 def create_expense_payment(expense_id: int, data: dict) -> int:
     now = _now()
     cur = get_db().execute(
         """INSERT INTO expense_payments
-               (expense_id, date, paid_by, amount, method, reference, notes, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+               (expense_id, date, paid_by, amount, method, reference, linked_tx_id, notes, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             expense_id,
             data.get("date", "") or "",
@@ -1839,6 +1953,7 @@ def create_expense_payment(expense_id: int, data: dict) -> int:
             _f(data.get("amount")),
             data.get("method", "") or "",
             data.get("reference", "") or "",
+            data.get("linked_tx_id") or None,
             data.get("notes", "") or "",
             now,
         ),
@@ -1849,7 +1964,7 @@ def create_expense_payment(expense_id: int, data: dict) -> int:
 def update_expense_payment(pid: int, data: dict) -> None:
     get_db().execute(
         """UPDATE expense_payments
-           SET date=?, paid_by=?, amount=?, method=?, reference=?, notes=?
+           SET date=?, paid_by=?, amount=?, method=?, reference=?, linked_tx_id=?, notes=?
            WHERE id=?""",
         (
             data.get("date", "") or "",
@@ -1857,6 +1972,7 @@ def update_expense_payment(pid: int, data: dict) -> None:
             _f(data.get("amount")),
             data.get("method", "") or "",
             data.get("reference", "") or "",
+            data.get("linked_tx_id") or None,
             data.get("notes", "") or "",
             pid,
         ),
@@ -1866,6 +1982,353 @@ def update_expense_payment(pid: int, data: dict) -> None:
 def delete_expense_payment(pid: int) -> None:
     get_db().execute("DELETE FROM expense_payments WHERE id = ?", (pid,))
     get_db().commit()
+
+
+def link_expense_payment_to_tx(payment_id: int, tx_id_or_none) -> None:
+    """Set or clear the linked_tx_id on an expense payment."""
+    get_db().execute(
+        "UPDATE expense_payments SET linked_tx_id = ? WHERE id = ?",
+        (int(tx_id_or_none) if tx_id_or_none else None, payment_id),
+    )
+    get_db().commit()
+
+
+def get_global_vendor_activity() -> dict:
+    """Return per-vendor totals across all claims, plus double-dip detection."""
+    db = get_db()
+
+    # 1. Check totals per (vendor_id, claim_id)
+    check_rows = _rows(db, """
+        SELECT d.vendor_id, t.claim_id,
+               SUM(d.amount) AS check_amount,
+               SUM(CASE WHEN LOWER(TRIM(t.type)) IN ('carrier','draw','escrow endorsed')
+                        THEN d.amount ELSE 0 END) AS released_amount,
+               GROUP_CONCAT(DISTINCT t.id) AS tx_ids_str
+        FROM disbursements d
+        JOIN transactions t ON t.id = d.transaction_id
+        WHERE d.vendor_id IS NOT NULL
+          AND (t.void IS NULL OR t.void = 0)
+        GROUP BY d.vendor_id, t.claim_id
+    """)
+
+    # 2. Expense totals per (vendor_id, claim_id)
+    exp_rows = _rows(db, """
+        SELECT e.vendor_id, e.claim_id,
+               SUM(e.invoice_amount)       AS expense_invoice,
+               GROUP_CONCAT(DISTINCT e.id) AS exp_ids_str
+        FROM expenses e
+        WHERE e.vendor_id IS NOT NULL
+        GROUP BY e.vendor_id, e.claim_id
+    """)
+
+    # 3. Expense payments totals per vendor_id
+    pay_rows = _rows(db, """
+        SELECT e.vendor_id,
+               COALESCE(SUM(CASE WHEN ep.paid_by='wp'     THEN ep.amount ELSE 0 END), 0) AS wp_paid,
+               COALESCE(SUM(CASE WHEN ep.paid_by='client' THEN ep.amount ELSE 0 END), 0) AS client_paid
+        FROM expenses e
+        JOIN expense_payments ep ON ep.expense_id = e.id
+        WHERE e.vendor_id IS NOT NULL
+        GROUP BY e.vendor_id
+    """)
+
+    # 3b. Expense client_amount and wp_amount sums per vendor (for classification)
+    client_amt_rows = _rows(db, """
+        SELECT vendor_id,
+               COALESCE(SUM(client_amount), 0) AS client_amount_sum,
+               COALESCE(SUM(wp_amount),     0) AS wp_amount_sum
+        FROM expenses
+        WHERE vendor_id IS NOT NULL
+        GROUP BY vendor_id
+    """)
+
+    # 3c. Fee taken from vendor disbursements
+    # Prorate t.recouped across vendor disbursements by their share of the tx's total
+    # fee_deferred, so that invoice-recouped fees (stored at tx level) are attributed correctly.
+    vendor_fee_rows = _rows(db, """
+        WITH tx_def AS (
+            SELECT transaction_id, SUM(fee_deferred) AS total_deferred
+            FROM disbursements WHERE fee_deferred > 0 GROUP BY transaction_id
+        )
+        SELECT d.vendor_id,
+               COALESCE(SUM(d.fee_owed), 0) AS fee_owed,
+               COALESCE(SUM(d.fee_deferred), 0) AS fee_deferred,
+               COALESCE(SUM(
+                   CASE WHEN d.fee_recouped > 0 THEN d.fee_recouped
+                        WHEN d.fee_deferred > 0 AND COALESCE(td.total_deferred, 0) > 0
+                             THEN t.recouped * d.fee_deferred / td.total_deferred
+                        ELSE 0 END
+               ), 0) AS fee_recouped
+        FROM disbursements d
+        JOIN transactions t ON t.id = d.transaction_id
+        LEFT JOIN tx_def td ON td.transaction_id = d.transaction_id
+        WHERE d.vendor_id IS NOT NULL
+          AND d.recipient_type = 'vendor'
+          AND (t.void IS NULL OR t.void = 0)
+        GROUP BY d.vendor_id
+    """)
+
+    # 4. All linked expense payments (for double-dip resolution detection)
+    linked_pays = _rows(db, """
+        SELECT ep.expense_id, ep.linked_tx_id
+        FROM expense_payments ep
+        WHERE ep.linked_tx_id IS NOT NULL
+    """)
+    linked_by_exp: dict = {}
+    for lp in linked_pays:
+        eid = lp["expense_id"]
+        if eid not in linked_by_exp:
+            linked_by_exp[eid] = set()
+        linked_by_exp[eid].add(lp["linked_tx_id"])
+
+    # 5. Lookups
+    vendors_map     = {v["id"]: v for v in _rows(db, "SELECT * FROM vendors")}
+    claims_map      = {c["id"]: c for c in _rows(db, "SELECT id, insured_name, job_number FROM claims")}
+    pay_by_v        = {r["vendor_id"]: r for r in pay_rows}
+    client_amt_by_v = {r["vendor_id"]: (_f(r["client_amount_sum"]), _f(r["wp_amount_sum"])) for r in client_amt_rows}
+    vendor_fee_by_v = {r["vendor_id"]: r for r in vendor_fee_rows}
+
+    # Build per-(vendor_id, claim_id) index
+    check_by_vc: dict = {}
+    exp_by_vc:   dict = {}
+    vendor_data: dict = {}  # vendor_id -> {claim_ids, check_amount, released_amount, expense_invoice}
+
+    for r in check_rows:
+        vid, cid = r["vendor_id"], r["claim_id"]
+        check_by_vc[(vid, cid)] = {
+            "check_amount":    _f(r["check_amount"]),
+            "released_amount": _f(r["released_amount"]),
+            "tx_ids": [int(x) for x in (r["tx_ids_str"] or "").split(",") if x],
+        }
+        if vid not in vendor_data:
+            vendor_data[vid] = {"claim_ids": set(), "check_amount": 0.0, "released_amount": 0.0, "expense_invoice": 0.0}
+        vendor_data[vid]["claim_ids"].add(cid)
+        vendor_data[vid]["check_amount"]    += _f(r["check_amount"])
+        vendor_data[vid]["released_amount"] += _f(r["released_amount"])
+
+    for r in exp_rows:
+        vid, cid = r["vendor_id"], r["claim_id"]
+        exp_by_vc[(vid, cid)] = {
+            "expense_invoice": _f(r["expense_invoice"]),
+            "exp_ids": [int(x) for x in (r["exp_ids_str"] or "").split(",") if x],
+        }
+        if vid not in vendor_data:
+            vendor_data[vid] = {"claim_ids": set(), "check_amount": 0.0, "released_amount": 0.0, "expense_invoice": 0.0}
+        vendor_data[vid]["claim_ids"].add(cid)
+        vendor_data[vid]["expense_invoice"] += _f(r["expense_invoice"])
+
+    # Build final vendor list
+    vendors_list = []
+    for vid, vdata in vendor_data.items():
+        v           = vendors_map.get(vid, {})
+        wp_paid     = _f(pay_by_v.get(vid, {}).get("wp_paid"))
+        client_paid = _f(pay_by_v.get(vid, {}).get("client_paid"))
+        exp_inv     = vdata["expense_invoice"]
+        outstanding = max(0.0, exp_inv - wp_paid - client_paid)
+        client_amt_sum, wp_amt_sum = client_amt_by_v.get(vid, (0.0, 0.0))
+        has_client = vdata["check_amount"] > 0.0 or client_amt_sum > 0.0
+        has_wp     = wp_amt_sum > 0.0
+        if has_client and has_wp:
+            vendor_cat = "both"
+        elif has_wp:
+            vendor_cat = "wp"
+        else:
+            vendor_cat = "client"
+        is_wp_only = vendor_cat == "wp"
+        vfr = vendor_fee_by_v.get(vid, {})
+        fee_owed     = _f(vfr.get("fee_owed"))
+        fee_deferred = _f(vfr.get("fee_deferred"))
+        fee_recouped = _f(vfr.get("fee_recouped"))
+        fee_collected = max(0.0, fee_owed - fee_deferred + fee_recouped)
+        fee_taken = fee_collected
+        vendors_list.append({
+            "id":              vid,
+            "name":            v.get("name", f"Vendor #{vid}"),
+            "claim_count":     len(vdata["claim_ids"]),
+            "check_amount":    vdata["check_amount"],
+            "released_amount": vdata["released_amount"],
+            "expense_invoice": exp_inv,
+            "wp_paid":         wp_paid,
+            "client_paid":     client_paid,
+            "outstanding":     outstanding,
+            "fee_taken":       fee_taken,
+            "fee_owed":        fee_owed,
+            "fee_deferred":    fee_deferred,
+            "fee_recouped":    fee_recouped,
+            "fee_collected":   fee_collected,
+            "is_wp_only":      is_wp_only,
+            "vendor_cat":      vendor_cat,
+        })
+    vendors_list.sort(key=lambda x: x["name"].lower())
+
+    vendors_client = [v for v in vendors_list if v["vendor_cat"] == "client"]
+    vendors_wp     = [v for v in vendors_list if v["vendor_cat"] == "wp"]
+    vendors_both   = [v for v in vendors_list if v["vendor_cat"] == "both"]
+
+    # Build double-dip list: (vendor_id, claim_id) in both check and expense
+    double_dip_claims = []
+    all_vc_keys = set(check_by_vc.keys()) | set(exp_by_vc.keys())
+    for (vid, cid) in all_vc_keys:
+        if (vid, cid) not in check_by_vc or (vid, cid) not in exp_by_vc:
+            continue
+        check_info = check_by_vc[(vid, cid)]
+        exp_info   = exp_by_vc[(vid, cid)]
+        tx_id_set  = set(check_info["tx_ids"])
+        # Resolved if any expense_payment links back to one of these transactions
+        resolved = any(
+            linked_by_exp.get(eid, set()) & tx_id_set
+            for eid in exp_info["exp_ids"]
+        )
+        if resolved:
+            continue
+        claim = claims_map.get(cid, {})
+        v     = vendors_map.get(vid, {})
+        double_dip_claims.append({
+            "claim_id":        cid,
+            "insured_name":    claim.get("insured_name", f"Claim #{cid}"),
+            "job_number":      claim.get("job_number", ""),
+            "vendor_id":       vid,
+            "vendor_name":     v.get("name", f"Vendor #{vid}"),
+            "check_amount":    check_info["check_amount"],
+            "tx_ids":          check_info["tx_ids"],
+            "expense_invoice": exp_info["expense_invoice"],
+            "exp_ids":         exp_info["exp_ids"],
+        })
+    double_dip_claims.sort(key=lambda x: (x["insured_name"].lower(), x["vendor_name"].lower()))
+
+    return {"vendors": vendors_list, "vendors_client": vendors_client, "vendors_wp": vendors_wp, "vendors_both": vendors_both, "double_dip_claims": double_dip_claims}
+
+
+def get_claim_vendor_activity(claim_id: int) -> list[dict]:
+    """Return per-vendor rows for one claim (vendor_id IS NOT NULL only)."""
+    db = get_db()
+
+    check_rows = _rows(db, """
+        SELECT d.vendor_id,
+               SUM(d.amount) AS check_amount,
+               SUM(CASE WHEN LOWER(TRIM(t.type)) IN ('carrier','draw','escrow endorsed')
+                        THEN d.amount ELSE 0 END) AS released_amount,
+               GROUP_CONCAT(DISTINCT t.id) AS tx_ids_str
+        FROM disbursements d
+        JOIN transactions t ON t.id = d.transaction_id
+        WHERE d.vendor_id IS NOT NULL
+          AND t.claim_id = ?
+          AND (t.void IS NULL OR t.void = 0)
+        GROUP BY d.vendor_id
+    """, (claim_id,))
+
+    exp_rows = _rows(db, """
+        SELECT e.vendor_id,
+               SUM(e.invoice_amount)       AS expense_invoice,
+               GROUP_CONCAT(DISTINCT e.id) AS exp_ids_str
+        FROM expenses e
+        WHERE e.vendor_id IS NOT NULL
+          AND e.claim_id = ?
+        GROUP BY e.vendor_id
+    """, (claim_id,))
+
+    pay_rows = _rows(db, """
+        SELECT e.vendor_id,
+               COALESCE(SUM(CASE WHEN ep.paid_by='wp'     THEN ep.amount ELSE 0 END), 0) AS wp_paid,
+               COALESCE(SUM(CASE WHEN ep.paid_by='client' THEN ep.amount ELSE 0 END), 0) AS client_paid
+        FROM expenses e
+        JOIN expense_payments ep ON ep.expense_id = e.id
+        WHERE e.vendor_id IS NOT NULL
+          AND e.claim_id = ?
+        GROUP BY e.vendor_id
+    """, (claim_id,))
+
+    fee_rows = _rows(db, """
+        WITH tx_def AS (
+            SELECT transaction_id, SUM(fee_deferred) AS total_deferred
+            FROM disbursements WHERE fee_deferred > 0 GROUP BY transaction_id
+        )
+        SELECT d.vendor_id,
+               COALESCE(SUM(d.fee_owed), 0) AS fee_owed,
+               COALESCE(SUM(d.fee_deferred), 0) AS fee_deferred,
+               COALESCE(SUM(
+                   CASE WHEN d.fee_recouped > 0 THEN d.fee_recouped
+                        WHEN d.fee_deferred > 0 AND COALESCE(td.total_deferred, 0) > 0
+                             THEN t.recouped * d.fee_deferred / td.total_deferred
+                        ELSE 0 END
+               ), 0) AS fee_recouped
+        FROM disbursements d
+        JOIN transactions t ON t.id = d.transaction_id
+        LEFT JOIN tx_def td ON td.transaction_id = d.transaction_id
+        WHERE d.vendor_id IS NOT NULL
+          AND d.recipient_type = 'vendor'
+          AND t.claim_id = ?
+          AND (t.void IS NULL OR t.void = 0)
+        GROUP BY d.vendor_id
+    """, (claim_id,))
+
+    vendors_map = {v["id"]: v for v in _rows(db, "SELECT * FROM vendors")}
+    check_by_v  = {r["vendor_id"]: r for r in check_rows}
+    exp_by_v    = {r["vendor_id"]: r for r in exp_rows}
+    pay_by_v    = {r["vendor_id"]: r for r in pay_rows}
+    fee_by_v    = {r["vendor_id"]: r for r in fee_rows}
+
+    linked_pays = _rows(db, """
+        SELECT ep.expense_id, ep.linked_tx_id
+        FROM expense_payments ep
+        JOIN expenses e ON e.id = ep.expense_id
+        WHERE e.claim_id = ? AND ep.linked_tx_id IS NOT NULL
+    """, (claim_id,))
+    linked_by_exp: dict = {}
+    for lp in linked_pays:
+        eid = lp["expense_id"]
+        if eid not in linked_by_exp:
+            linked_by_exp[eid] = set()
+        linked_by_exp[eid].add(lp["linked_tx_id"])
+
+    all_vids = set(check_by_v.keys()) | set(exp_by_v.keys())
+    rows = []
+    for vid in sorted(all_vids):
+        v   = vendors_map.get(vid, {})
+        ci  = check_by_v.get(vid, {})
+        ei  = exp_by_v.get(vid, {})
+        pi  = pay_by_v.get(vid, {})
+
+        check_amount    = _f(ci.get("check_amount"))
+        released_amount = _f(ci.get("released_amount"))
+        expense_invoice = _f(ei.get("expense_invoice"))
+        wp_paid         = _f(pi.get("wp_paid"))
+        client_paid     = _f(pi.get("client_paid"))
+        outstanding     = max(0.0, expense_invoice - wp_paid - client_paid)
+        tx_ids  = [int(x) for x in (ci.get("tx_ids_str") or "").split(",") if x]
+        exp_ids = [int(x) for x in (ei.get("exp_ids_str") or "").split(",") if x]
+        fi = fee_by_v.get(vid, {})
+        fee_owed      = _f(fi.get("fee_owed"))
+        fee_deferred  = _f(fi.get("fee_deferred"))
+        fee_recouped  = _f(fi.get("fee_recouped"))
+        fee_collected = max(0.0, fee_owed - fee_deferred + fee_recouped)
+        fee_taken     = fee_collected
+
+        is_double_dip = False
+        if ci and ei:
+            tx_id_set = set(tx_ids)
+            resolved  = any(linked_by_exp.get(eid, set()) & tx_id_set for eid in exp_ids)
+            is_double_dip = not resolved
+
+        rows.append({
+            "vendor_id":       vid,
+            "vendor_name":     v.get("name", f"Vendor #{vid}"),
+            "from_checks":     check_amount,
+            "paid_out":        released_amount,
+            "from_expenses":   expense_invoice,
+            "wp_paid":         wp_paid,
+            "client_paid":     client_paid,
+            "outstanding":     outstanding,
+            "fee_taken":       fee_taken,
+            "fee_owed":        fee_owed,
+            "fee_deferred":    fee_deferred,
+            "fee_recouped":    fee_recouped,
+            "fee_collected":   fee_collected,
+            "tx_ids":          tx_ids,
+            "exp_ids":         exp_ids,
+            "is_double_dip":   is_double_dip,
+        })
+    return rows
 
 
 # ---------------------------------------------------------------------------
@@ -1942,6 +2405,243 @@ def create_wp_reimbursement(expense_id: int, data: dict) -> int:
 def delete_wp_reimbursement(rid: int) -> None:
     get_db().execute("DELETE FROM expense_wp_reimbursements WHERE id = ?", (rid,))
     get_db().commit()
+
+
+# ---------------------------------------------------------------------------
+# Client View
+# ---------------------------------------------------------------------------
+
+def get_client_view_data(claim_id: int) -> dict:
+    """Return all data needed for the client-facing claim view page."""
+    txs = get_transactions(claim_id)
+
+    insurance_checks = []
+    mortgage_sent = []
+    mortgage_received = []
+
+    for tx in txs:
+        if tx.get("void"):
+            continue
+        t_type = (tx.get("type") or "").lower().strip()
+        if t_type == "fee invoice":
+            continue
+
+        tx_id = tx["id"]
+        if t_type in RELEASED_TYPES:
+            if tx.get("all_disburse_received"):
+                status = "Released"
+            elif tx.get("all_client_rcvd"):
+                status = "Fee Pending"
+            elif tx.get("all_fee_rcvd"):
+                status = "Client Pending"
+            else:
+                status = "Pending"
+        else:
+            status = "Planned"
+
+        if t_type == "carrier":
+            disbs = get_disbursements(tx_id)
+            insured_amount = sum(
+                _f(d["amount"]) - _f(d["fee_owed"]) + _f(d["fee_deferred"]) - _f(d["fee_recouped"])
+                for d in disbs if d["recipient_type"] == "insured"
+            )
+            vendor_amounts: dict[int, float] = {}
+            for d in disbs:
+                if d["recipient_type"] == "vendor" and d.get("vendor_id"):
+                    vid = d["vendor_id"]
+                    net = _f(d["amount"]) - _f(d["fee_owed"]) + _f(d["fee_deferred"]) - _f(d["fee_recouped"])
+                    vendor_amounts[vid] = vendor_amounts.get(vid, 0.0) + net
+            has_d = tx.get("has_disbursements")
+            fee_amount    = _f(tx.get("disburse_fee_owed"))     if has_d else _f(tx.get("fee_owed"))
+            fee_deferred  = _f(tx.get("disburse_fee_deferred")) if has_d else _f(tx.get("deferred"))
+            fee_recouped  = _f(tx.get("disburse_fee_recouped")) if has_d else _f(tx.get("recouped"))
+            insurance_checks.append({
+                "id": tx_id,
+                "check_number": tx.get("check_number") or "",
+                "date": tx.get("date") or "",
+                "amount": _f(tx.get("amount")),
+                "status": status,
+                "insured_amount": insured_amount,
+                "fee_amount": fee_amount,
+                "fee_deferred": fee_deferred,
+                "fee_recouped": fee_recouped,
+                "vendor_amounts": vendor_amounts,
+            })
+
+        elif t_type == "escrow":
+            mortgage_sent.append({
+                "id": tx_id,
+                "check_number": tx.get("check_number") or "",
+                "date": tx.get("date") or "",
+                "amount": _f(tx.get("amount")),
+            })
+
+        elif t_type in ("draw", "escrow endorsed"):
+            disbs = get_disbursements(tx_id)
+            insured_amount = sum(
+                _f(d["amount"]) - _f(d["fee_owed"]) + _f(d["fee_deferred"]) - _f(d["fee_recouped"])
+                for d in disbs if d["recipient_type"] == "insured"
+            )
+            vendor_amounts = {}
+            for d in disbs:
+                if d["recipient_type"] == "vendor" and d.get("vendor_id"):
+                    vid = d["vendor_id"]
+                    net = _f(d["amount"]) - _f(d["fee_owed"]) + _f(d["fee_deferred"]) - _f(d["fee_recouped"])
+                    vendor_amounts[vid] = vendor_amounts.get(vid, 0.0) + net
+            has_d = tx.get("has_disbursements")
+            fee_amount    = _f(tx.get("disburse_fee_owed"))     if has_d else _f(tx.get("fee_owed"))
+            fee_deferred  = _f(tx.get("disburse_fee_deferred")) if has_d else _f(tx.get("deferred"))
+            fee_recouped  = _f(tx.get("disburse_fee_recouped")) if has_d else _f(tx.get("recouped"))
+            type_label = "Draw" if t_type == "draw" else "Escrow Endorsed"
+            mortgage_received.append({
+                "id": tx_id,
+                "check_number": tx.get("check_number") or "",
+                "date": tx.get("date") or "",
+                "amount": _f(tx.get("amount")),
+                "type": type_label,
+                "status": status,
+                "insured_amount": insured_amount,
+                "fee_amount": fee_amount,
+                "fee_deferred": fee_deferred,
+                "fee_recouped": fee_recouped,
+                "vendor_amounts": vendor_amounts,
+            })
+
+    def _vendors_for(checks: list[dict]) -> list[dict]:
+        """Return vendors that received any money across the given set of checks, sorted by name."""
+        ids: set[int] = set()
+        for ck in checks:
+            for vid, amt in ck["vendor_amounts"].items():
+                if amt > 0.005:
+                    ids.add(vid)
+        if not ids:
+            return []
+        placeholders = ",".join("?" * len(ids))
+        rows = _rows(
+            get_db(),
+            f"SELECT id, name FROM vendors WHERE id IN ({placeholders}) ORDER BY name",
+            list(ids),
+        )
+        return [{"id": r["id"], "name": r["name"]} for r in rows]
+
+    insurance_vendors = _vendors_for(insurance_checks)
+    mortgage_vendors  = _vendors_for(mortgage_received)
+
+    # Fee invoices: direct bills to client for deferred fees
+    fee_invoices: list[dict] = []
+    for tx in txs:
+        if tx.get("void"):
+            continue
+        if (tx.get("type") or "").lower().strip() != "fee invoice":
+            continue
+        amount = _f(tx.get("amount"))
+        paid   = _f(tx.get("amount_paid"))
+        balance = amount - paid
+        if balance <= 0.005:
+            inv_status = "Paid"
+        elif paid > 0.005:
+            inv_status = "Partial"
+        else:
+            inv_status = "Unpaid"
+        fee_invoices.append({
+            "id": tx["id"],
+            "invoice_number": tx.get("invoice_number") or "",
+            "date": tx.get("date") or "",
+            "amount": amount,
+            "paid": paid,
+            "balance": balance,
+            "status": inv_status,
+        })
+
+    # Expenses: only where client has financial stake, excluding fully check-linked ones
+    all_expenses = get_expenses(claim_id)
+    expenses: list[dict] = []
+    for exp in all_expenses:
+        client_amount = _f(exp.get("client_amount"))
+        client_paid = _f(exp.get("client_paid"))
+        if client_amount <= 0 and client_paid <= 0:
+            continue
+        payments = get_expense_payments(exp["id"])
+        if payments and all(p.get("linked_tx_id") for p in payments):
+            continue  # fully covered via insurance check — skip
+        balance = client_amount - client_paid
+        if balance <= 0.005:
+            exp_status = "Paid"
+        elif client_paid > 0.005:
+            exp_status = "Partial"
+        else:
+            exp_status = "Unpaid"
+        expenses.append({
+            "id": exp["id"],
+            "invoice_date": exp.get("invoice_date") or "",
+            "payee_name": exp.get("payee_name") or "",
+            "reason": exp.get("reason") or "",
+            "invoice_amount": _f(exp.get("invoice_amount")),
+            "client_amount": client_amount,
+            "client_paid": client_paid,
+            "balance": balance,
+            "status": exp_status,
+        })
+
+    # Totals
+    total_insurance = sum(c["amount"] for c in insurance_checks)
+    insurance_to_client  = sum(c["insured_amount"] for c in insurance_checks)
+    insurance_to_vendors = sum(sum(c["vendor_amounts"].values()) for c in insurance_checks)
+    insurance_fee        = sum(c["fee_amount"]      for c in insurance_checks)
+    insurance_deferred   = sum(c["fee_deferred"]    for c in insurance_checks)
+    insurance_recouped   = sum(c["fee_recouped"]    for c in insurance_checks)
+
+    total_escrow_sent       = sum(c["amount"] for c in mortgage_sent)
+    total_mortgage_received = sum(c["amount"] for c in mortgage_received)
+    still_in_escrow         = max(0.0, total_escrow_sent - total_mortgage_received)
+    mortgage_to_client  = sum(c["insured_amount"] for c in mortgage_received)
+    mortgage_to_vendors = sum(sum(c["vendor_amounts"].values()) for c in mortgage_received)
+    mortgage_fee        = sum(c["fee_amount"]      for c in mortgage_received)
+    mortgage_deferred   = sum(c["fee_deferred"]    for c in mortgage_received)
+    mortgage_recouped   = sum(c["fee_recouped"]    for c in mortgage_received)
+
+    client_expense_owes    = sum(e["client_amount"] for e in expenses)
+    client_expense_paid    = sum(e["client_paid"]   for e in expenses)
+    client_expense_balance = client_expense_owes - client_expense_paid
+
+    fee_invoice_total   = sum(i["amount"]  for i in fee_invoices)
+    fee_invoice_paid    = sum(i["paid"]    for i in fee_invoices)
+    fee_invoice_balance = sum(i["balance"] for i in fee_invoices)
+
+    return {
+        "insurance_checks": insurance_checks,
+        "mortgage_sent": mortgage_sent,
+        "mortgage_received": mortgage_received,
+        "insurance_vendors": insurance_vendors,
+        "mortgage_vendors": mortgage_vendors,
+        "fee_invoices": fee_invoices,
+        "expenses": expenses,
+        "totals": {
+            "total_insurance": total_insurance,
+            "insurance_to_client": insurance_to_client,
+            "insurance_to_vendors": insurance_to_vendors,
+            "insurance_fee": insurance_fee,
+            "insurance_deferred": insurance_deferred,
+            "insurance_recouped": insurance_recouped,
+            "total_escrow_sent": total_escrow_sent,
+            "total_mortgage_received": total_mortgage_received,
+            "still_in_escrow": still_in_escrow,
+            "mortgage_to_client": mortgage_to_client,
+            "mortgage_to_vendors": mortgage_to_vendors,
+            "mortgage_fee": mortgage_fee,
+            "mortgage_deferred": mortgage_deferred,
+            "mortgage_recouped": mortgage_recouped,
+            "total_to_client": insurance_to_client + mortgage_to_client,
+            "total_to_vendors": insurance_to_vendors + mortgage_to_vendors,
+            "total_fee": insurance_fee + mortgage_fee,
+            "fee_invoice_total": fee_invoice_total,
+            "fee_invoice_paid": fee_invoice_paid,
+            "fee_invoice_balance": fee_invoice_balance,
+            "client_expense_owes": client_expense_owes,
+            "client_expense_paid": client_expense_paid,
+            "client_expense_balance": client_expense_balance,
+        },
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -2293,6 +2993,65 @@ def get_fee_invoices(claim_id: int) -> list[dict]:
           AND (void IS NULL OR void = 0)
         ORDER BY sequence_number, id
     """, (claim_id,))
+
+
+def get_claim_vendor_detail(claim_id: int, vendor_id: int) -> dict:
+    """Full breakdown of a vendor's activity on one claim: disbursements + expenses with payments."""
+    db = get_db()
+    released = {"carrier", "draw", "escrow endorsed"}
+
+    disbursements = _rows(db, """
+        SELECT d.id AS disburse_id, d.amount, d.notes,
+               t.id AS tx_id, t.type, t.date, t.check_number, t.sequence_number
+        FROM disbursements d
+        JOIN transactions t ON t.id = d.transaction_id
+        WHERE t.claim_id = ?
+          AND d.vendor_id = ?
+          AND (t.void IS NULL OR t.void = 0)
+        ORDER BY t.sequence_number, d.id
+    """, (claim_id, vendor_id))
+    for d in disbursements:
+        d["is_released"] = (d.get("type") or "").lower().strip() in released
+
+    expenses = _rows(db, """
+        SELECT * FROM expenses WHERE claim_id = ? AND vendor_id = ?
+        ORDER BY invoice_date, id
+    """, (claim_id, vendor_id))
+    for exp in expenses:
+        payments = _rows(db, """
+            SELECT ep.*, t.check_number AS linked_tx_check_number
+            FROM expense_payments ep
+            LEFT JOIN transactions t ON t.id = ep.linked_tx_id
+            WHERE ep.expense_id = ?
+            ORDER BY ep.date, ep.id
+        """, (exp["id"],))
+        exp["payments"] = payments
+        exp["wp_paid"]     = sum(_f(p["amount"]) for p in payments if (p.get("paid_by") or "") == "wp")
+        exp["client_paid"] = sum(_f(p["amount"]) for p in payments if (p.get("paid_by") or "") == "client")
+        exp["total_paid"]  = exp["wp_paid"] + exp["client_paid"]
+        exp["outstanding"] = max(0.0, _f(exp.get("invoice_amount")) - exp["total_paid"])
+
+    return {"disbursements": disbursements, "expenses": expenses}
+
+
+def get_claim_txs_with_vendor_disbursement(claim_id: int, vendor_id: int) -> list[dict]:
+    """Return non-void transactions that have a disbursement to this vendor,
+    with the total amount paid to that vendor on each check and the tx type."""
+    rows = _rows(get_db(), """
+        SELECT t.id, t.sequence_number, t.type, t.date, t.check_number,
+               SUM(d.amount) AS vendor_amount
+        FROM transactions t
+        JOIN disbursements d ON d.transaction_id = t.id
+        WHERE t.claim_id = ?
+          AND d.vendor_id = ?
+          AND (t.void IS NULL OR t.void = 0)
+        GROUP BY t.id
+        ORDER BY t.sequence_number, t.id
+    """, (claim_id, vendor_id))
+    released = {"carrier", "draw", "escrow endorsed"}
+    for r in rows:
+        r["is_released"] = (r.get("type") or "").lower().strip() in released
+    return rows
 
 
 def get_claim_transactions_for_select(claim_id: int, exclude_tx_id: int | None = None) -> list[dict]:
@@ -3043,7 +3802,7 @@ def get_global_status() -> dict:
 
     pending_checks = _rows(db, """
         SELECT t.id AS tx_id, t.sequence_number, t.type, t.date AS check_date,
-               t.check_number, t.amount,
+               t.check_number, t.amount, t.follow_up_date,
                c.id AS claim_id, c.insured_name, c.job_number, c.claim_number,
                (SELECT COUNT(*) FROM disbursements d
                 WHERE d.transaction_id = t.id
@@ -3079,12 +3838,14 @@ def get_global_status() -> dict:
                   AND d.amount > 0.005
             )
           )
-        ORDER BY c.insured_name, t.date, t.id
+        ORDER BY CASE WHEN t.follow_up_date IS NULL THEN 1 ELSE 0 END,
+                 t.follow_up_date ASC, c.insured_name, t.date, t.id
     """)
 
     open_escrow = _rows(db, """
         WITH escrowed AS (
             SELECT c.id AS claim_id, c.job_number, c.claim_number, c.insured_name,
+                   c.follow_up_date,
                    COALESCE(SUM(CASE WHEN LOWER(TRIM(t.type))='escrow'
                                      THEN t.amount ELSE 0 END), 0) AS total_escrowed,
                    COALESCE(SUM(CASE WHEN LOWER(TRIM(t.type)) IN ('draw','escrow endorsed')
@@ -3115,7 +3876,8 @@ def get_global_status() -> dict:
               AND t_inv.total_collected > 0.005
               AND LOWER(TRIM(t_def.type)) = 'escrow'
         )
-        ORDER BY e.insured_name
+        ORDER BY CASE WHEN e.follow_up_date IS NULL THEN 1 ELSE 0 END,
+                 e.follow_up_date ASC, e.insured_name
     """)
     for row in open_escrow:
         row["net_in_escrow"] = round(
@@ -3141,20 +3903,48 @@ def get_global_status() -> dict:
             LEFT JOIN d_agg d ON d.transaction_id = t.id
             WHERE (t.void IS NULL OR t.void = 0)
             GROUP BY t.claim_id
+        ),
+        vendor_agg AS (
+            -- Sum of vendor-linked deferred fees still outstanding (shown separately)
+            SELECT t.claim_id,
+                   SUM(COALESCE(d.fee_deferred, 0) -
+                       CASE WHEN COALESCE(d.fee_recouped, 0) > COALESCE(t.recouped, 0)
+                            THEN COALESCE(d.fee_recouped, 0)
+                            ELSE COALESCE(t.recouped, 0) END) AS vendor_outstanding
+            FROM disbursements d
+            JOIN transactions t ON t.id = d.transaction_id
+            WHERE d.vendor_id IS NOT NULL
+              AND COALESCE(d.fee_deferred, 0) > 0.005
+              AND (t.void IS NULL OR t.void = 0)
+              AND NOT EXISTS (
+                  SELECT 1 FROM recouped_deferred_links rdl WHERE rdl.deferred_tx_id = t.id
+              )
+            GROUP BY t.claim_id
         )
         SELECT c.id AS claim_id, c.job_number, c.claim_number, c.insured_name,
+               c.follow_up_date,
                COALESCE(ta.total_deferred, 0) AS total_deferred,
                COALESCE(ta.total_recouped, 0) AS total_recouped,
-               COALESCE(ta.total_deferred, 0) - COALESCE(ta.total_recouped, 0) AS unrecouped
+               COALESCE(ta.total_deferred, 0) - COALESCE(ta.total_recouped, 0)
+                   - COALESCE(va.vendor_outstanding, 0) AS unrecouped
         FROM claims c
         LEFT JOIN tx_agg ta ON ta.claim_id = c.id
-        WHERE COALESCE(ta.total_deferred, 0) - COALESCE(ta.total_recouped, 0) > 0.005
-        ORDER BY c.insured_name
+        LEFT JOIN vendor_agg va ON va.claim_id = c.id
+        WHERE COALESCE(ta.total_deferred, 0) - COALESCE(ta.total_recouped, 0)
+              - COALESCE(va.vendor_outstanding, 0) > 0.005
+        ORDER BY CASE WHEN c.follow_up_date IS NULL THEN 1 ELSE 0 END,
+                 c.follow_up_date ASC, c.insured_name
     """)
 
     pending_expenses = _rows(db, """
         SELECT e.id AS exp_id, e.invoice_date, e.payee_name, e.invoice_amount,
-               e.responsible_party, e.reason,
+               CASE
+                 WHEN COALESCE(e.client_amount, 0) > 0 AND COALESCE(e.wp_amount, 0) > 0 THEN 'Both'
+                 WHEN COALESCE(e.client_amount, 0) > 0 THEN 'Client'
+                 WHEN COALESCE(e.wp_amount, 0) > 0 THEN 'WP'
+                 ELSE COALESCE(e.responsible_party, '')
+               END AS responsible_party,
+               e.reason, e.follow_up_date,
                COALESCE(p.total_paid, 0) AS total_paid,
                e.invoice_amount - COALESCE(p.total_paid, 0) AS outstanding,
                MAX(0, COALESCE(p.wp_paid, 0) - COALESCE(e.wp_amount, 0))
@@ -3184,20 +3974,72 @@ def get_global_status() -> dict:
                - COALESCE(r.reimbursed, 0) > 0.005)
            OR (MAX(0, COALESCE(p.client_paid, 0) - COALESCE(e.client_amount, 0))
                - COALESCE(wr.wp_reimb_paid, 0) > 0.005)
-        ORDER BY c.insured_name, e.invoice_date, e.id
+        ORDER BY CASE WHEN e.follow_up_date IS NULL THEN 1 ELSE 0 END,
+                 e.follow_up_date ASC, c.insured_name, e.invoice_date, e.id
     """)
 
     pending_fee_invoices = _rows(db, """
         SELECT t.id AS tx_id, t.sequence_number, t.invoice_number, t.date,
                t.amount, COALESCE(t.total_collected, 0) AS total_collected,
                t.amount - COALESCE(t.total_collected, 0) AS balance_due,
+               t.follow_up_date,
                c.id AS claim_id, c.insured_name, c.job_number, c.claim_number
         FROM transactions t
         JOIN claims c ON c.id = t.claim_id
         WHERE LOWER(TRIM(t.type)) = 'fee invoice'
+          AND LOWER(TRIM(COALESCE(t.inv_for, 'insured'))) != 'vendor'
           AND (t.void IS NULL OR t.void = 0)
           AND t.amount - COALESCE(t.total_collected, 0) > 0.005
-        ORDER BY c.insured_name, t.date, t.id
+        ORDER BY CASE WHEN t.follow_up_date IS NULL THEN 1 ELSE 0 END,
+                 t.follow_up_date ASC, c.insured_name, t.date, t.id
+    """)
+
+    vendor_fee_invoices = _rows(db, """
+        SELECT t.id AS tx_id, t.invoice_number, t.date,
+               t.amount, COALESCE(t.total_collected, 0) AS total_collected,
+               t.amount - COALESCE(t.total_collected, 0) AS balance_due,
+               t.follow_up_date,
+               v.name AS vendor_name,
+               c.id AS claim_id, c.insured_name, c.job_number, c.claim_number
+        FROM transactions t
+        JOIN claims c ON c.id = t.claim_id
+        LEFT JOIN vendors v ON v.id = t.inv_vendor_id
+        WHERE LOWER(TRIM(t.type)) = 'fee invoice'
+          AND LOWER(TRIM(COALESCE(t.inv_for, 'insured'))) = 'vendor'
+          AND (t.void IS NULL OR t.void = 0)
+          AND t.amount - COALESCE(t.total_collected, 0) > 0.005
+        ORDER BY CASE WHEN t.follow_up_date IS NULL THEN 1 ELSE 0 END,
+                 t.follow_up_date ASC, c.insured_name, t.date, t.id
+    """)
+
+    vendor_deferred = _rows(db, """
+        SELECT d.id AS disb_id, v.name AS vendor_name,
+               COALESCE(d.fee_deferred, 0) AS fee_deferred,
+               CASE WHEN COALESCE(d.fee_recouped, 0) > COALESCE(t.recouped, 0)
+                    THEN COALESCE(d.fee_recouped, 0)
+                    ELSE COALESCE(t.recouped, 0) END AS fee_recouped,
+               COALESCE(d.fee_deferred, 0) -
+                   CASE WHEN COALESCE(d.fee_recouped, 0) > COALESCE(t.recouped, 0)
+                        THEN COALESCE(d.fee_recouped, 0)
+                        ELSE COALESCE(t.recouped, 0) END AS outstanding,
+               t.id AS tx_id, t.check_number, t.date AS check_date,
+               c.id AS claim_id, c.insured_name, c.job_number, c.follow_up_date
+        FROM disbursements d
+        JOIN transactions t ON t.id = d.transaction_id
+        JOIN claims c ON c.id = t.claim_id
+        JOIN vendors v ON v.id = d.vendor_id
+        WHERE d.vendor_id IS NOT NULL
+          AND (t.void IS NULL OR t.void = 0)
+          AND COALESCE(d.fee_deferred, 0) -
+              CASE WHEN COALESCE(d.fee_recouped, 0) > COALESCE(t.recouped, 0)
+                   THEN COALESCE(d.fee_recouped, 0)
+                   ELSE COALESCE(t.recouped, 0) END > 0.005
+          AND NOT EXISTS (
+              SELECT 1 FROM recouped_deferred_links rdl
+              WHERE rdl.deferred_tx_id = t.id
+          )
+        ORDER BY CASE WHEN c.follow_up_date IS NULL THEN 1 ELSE 0 END,
+                 c.follow_up_date ASC, c.insured_name, v.name
     """)
 
     # Attach status notes to each row
@@ -3229,6 +4071,8 @@ def get_global_status() -> dict:
         "unrecouped_deferred": unrecouped,
         "pending_expenses": pending_expenses,
         "pending_fee_invoices": pending_fee_invoices,
+        "vendor_fee_invoices": vendor_fee_invoices,
+        "vendor_deferred": vendor_deferred,
         "claim_adjusters": claim_adjusters,
         "all_adjusters": all_adjusters,
     }
@@ -3246,6 +4090,19 @@ def set_status_note(entity_type: str, entity_id: int, notes: str) -> None:
     else:
         db.execute("DELETE FROM status_notes WHERE entity_type=? AND entity_id=?",
                    (entity_type, entity_id))
+    db.commit()
+
+
+def set_follow_up_date(entity_type: str, entity_id: int, date_str: str) -> None:
+    """Set or clear the follow_up_date on a transaction, claim, or expense."""
+    db = get_db()
+    val = date_str.strip() if date_str and date_str.strip() else None
+    if entity_type == "tx":
+        db.execute("UPDATE transactions SET follow_up_date = ? WHERE id = ?", (val, entity_id))
+    elif entity_type == "claim":
+        db.execute("UPDATE claims SET follow_up_date = ? WHERE id = ?", (val, entity_id))
+    elif entity_type == "expense":
+        db.execute("UPDATE expenses SET follow_up_date = ? WHERE id = ?", (val, entity_id))
     db.commit()
 
 
@@ -3503,21 +4360,31 @@ def get_run_builder_data(run_id: int) -> dict:
     """, (run_id,)):
         other_run_exp_splits[r["exp_split_id"]] = r["run_name"]
 
-    # Get all fee_recipients with payroll splits (paid or unpaid)
-    # We show ALL unpaid splits for the builder
+    period_from = run.get("period_from") or ""
+    period_to   = run.get("period_to") or ""
+
+    # Get all fee_recipients with unpaid splits in the run's period
+    # Match by recipient_id OR by name (for older splits without recipient_id set)
     fr_rows = _rows(db, """
         SELECT DISTINCT fr.id, fr.name, COALESCE(fr.company_name, '') AS company_name
         FROM fee_recipients fr
-        JOIN transaction_splits ts ON ts.recipient_id = fr.id
+        JOIN transaction_splits ts ON (
+            ts.recipient_id = fr.id
+            OR (ts.recipient_id IS NULL AND LOWER(TRIM(ts.name)) = LOWER(TRIM(fr.name)))
+        )
         JOIN transactions t ON t.id = ts.transaction_id
-        WHERE (t.void IS NULL OR t.void = 0)
+        WHERE fr.payroll_visible = 1
+          AND (t.void IS NULL OR t.void = 0)
           AND LOWER(TRIM(t.type)) != 'escrow'
-          AND (ts.payroll_paid IS NULL OR ts.payroll_paid < 0.005)
         UNION
         SELECT DISTINCT fr.id, fr.name, COALESCE(fr.company_name, '') AS company_name
         FROM fee_recipients fr
-        JOIN expense_splits es ON es.recipient_id = fr.id
-        WHERE (es.payroll_paid IS NULL OR es.payroll_paid < 0.005)
+        JOIN expense_splits es ON (
+            es.recipient_id = fr.id
+            OR (es.recipient_id IS NULL AND LOWER(TRIM(es.name)) = LOWER(TRIM(fr.name)))
+        )
+        JOIN expenses e ON e.id = es.expense_id
+        WHERE fr.payroll_visible = 1
         ORDER BY fr.name
     """)
 
@@ -3531,7 +4398,16 @@ def get_run_builder_data(run_id: int) -> dict:
     for fr in fr_rows:
         frid = fr["id"]
         # tx splits (unpaid, non-void, non-escrow)
-        tx_splits_raw = _rows(db, """
+        date_filter = ""
+        date_params: list = [frid, fr["name"]]
+        if period_from:
+            date_filter += " AND (t.date >= ? OR ts.id IN (SELECT split_id FROM payroll_run_splits WHERE run_id=?))"
+            date_params += [period_from, run_id]
+        if period_to:
+            date_filter += " AND (t.date <= ? OR ts.id IN (SELECT split_id FROM payroll_run_splits WHERE run_id=?))"
+            date_params += [period_to, run_id]
+
+        tx_splits_raw = _rows(db, f"""
             SELECT ts.id AS split_id, ts.transaction_id, ts.split_pct, ts.role, ts.name,
                    ts.payroll_paid, ts.payroll_paid_date, ts.recipient_id,
                    t.id AS tx_id, t.date, t.type, t.check_number,
@@ -3539,12 +4415,12 @@ def get_run_builder_data(run_id: int) -> dict:
             FROM transaction_splits ts
             JOIN transactions t ON t.id = ts.transaction_id
             JOIN claims c ON c.id = t.claim_id
-            WHERE ts.recipient_id = ?
+            WHERE (ts.recipient_id = ? OR (ts.recipient_id IS NULL AND LOWER(TRIM(ts.name)) = LOWER(TRIM(?))))
               AND (t.void IS NULL OR t.void = 0)
               AND LOWER(TRIM(t.type)) != 'escrow'
-              AND (ts.payroll_paid IS NULL OR ts.payroll_paid < 0.005)
+              {date_filter}
             ORDER BY t.date DESC, t.id DESC
-        """, (frid,))
+        """, date_params)
 
         tx_splits = []
         selected_tx_total = 0.0
@@ -3553,6 +4429,13 @@ def get_run_builder_data(run_id: int) -> dict:
             in_run = sid in in_run_splits
             in_other = sid in other_run_splits and not in_run
             earned = _payroll_earned_for_split(dict(s))
+            payroll_paid_amt = float(s.get("payroll_paid") or 0)
+            remaining = max(0.0, round(earned - payroll_paid_amt, 2))
+            is_partial = payroll_paid_amt > 0.005 and remaining > 0.005
+            is_fully_paid = payroll_paid_amt > 0.005 and remaining <= 0.005
+            # Skip fully paid splits not in this run; skip zero-earned splits not in this run
+            if (is_fully_paid or earned <= 0.005) and not in_run:
+                continue
             tx_splits.append({
                 "split_id": sid,
                 "in_run": in_run,
@@ -3567,12 +4450,24 @@ def get_run_builder_data(run_id: int) -> dict:
                 "role": s.get("role") or "",
                 "split_pct": s.get("split_pct") or 0,
                 "earned": earned,
+                "payroll_paid": payroll_paid_amt,
+                "remaining": remaining,
+                "is_partial": is_partial,
             })
             if in_run:
-                selected_tx_total += earned
+                selected_tx_total += remaining
 
         # expense splits (unpaid)
-        exp_splits_raw = _rows(db, """
+        exp_date_filter = ""
+        exp_date_params: list = [frid, fr["name"]]
+        if period_from:
+            exp_date_filter += " AND (e.invoice_date >= ? OR es.id IN (SELECT exp_split_id FROM payroll_run_exp_splits WHERE run_id=?))"
+            exp_date_params += [period_from, run_id]
+        if period_to:
+            exp_date_filter += " AND (e.invoice_date <= ? OR es.id IN (SELECT exp_split_id FROM payroll_run_exp_splits WHERE run_id=?))"
+            exp_date_params += [period_to, run_id]
+
+        exp_splits_raw = _rows(db, f"""
             SELECT es.id AS exp_split_id, es.split_pct, es.role, es.name,
                    es.payroll_paid,
                    e.id AS exp_id, e.invoice_date, e.payee_name, e.wp_amount,
@@ -3580,10 +4475,10 @@ def get_run_builder_data(run_id: int) -> dict:
             FROM expense_splits es
             JOIN expenses e ON e.id = es.expense_id
             JOIN claims c ON c.id = e.claim_id
-            WHERE es.recipient_id = ?
-              AND (es.payroll_paid IS NULL OR es.payroll_paid < 0.005)
+            WHERE (es.recipient_id = ? OR (es.recipient_id IS NULL AND LOWER(TRIM(es.name)) = LOWER(TRIM(?))))
+              {exp_date_filter}
             ORDER BY e.invoice_date DESC, e.id DESC
-        """, (frid,))
+        """, exp_date_params)
 
         exp_splits = []
         selected_exp_total = 0.0
@@ -3592,6 +4487,12 @@ def get_run_builder_data(run_id: int) -> dict:
             in_run = esid in in_run_exp_splits
             in_other = esid in other_run_exp_splits and not in_run
             owed = round(float(es.get("wp_amount") or 0) * float(es.get("split_pct") or 0) / 100, 2)
+            payroll_paid_amt = float(es.get("payroll_paid") or 0)
+            remaining = max(0.0, round(owed - payroll_paid_amt, 2))
+            is_partial = payroll_paid_amt > 0.005 and remaining > 0.005
+            is_fully_paid = payroll_paid_amt > 0.005 and remaining <= 0.005
+            if (is_fully_paid or owed <= 0.005) and not in_run:
+                continue
             exp_splits.append({
                 "exp_split_id": esid,
                 "in_run": in_run,
@@ -3604,9 +4505,16 @@ def get_run_builder_data(run_id: int) -> dict:
                 "role": es.get("role") or "",
                 "split_pct": es.get("split_pct") or 0,
                 "owed": owed,
+                "payroll_paid": payroll_paid_amt,
+                "remaining": remaining,
+                "is_partial": is_partial,
             })
             if in_run:
-                selected_exp_total += owed
+                selected_exp_total += remaining
+
+        # Skip payees with no visible splits (e.g. fully paid, not in this run)
+        if not tx_splits and not exp_splits:
+            continue
 
         sal_info = fr_salary_map.get(frid, {})
         payees.append({

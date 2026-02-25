@@ -90,7 +90,12 @@
       <td>{{ s.date or '—' }}</td>
       <td>{{ s.type or '—' }}</td>
       <td class="text-right">{{ s.split_pct }}%</td>
-      <td class="text-right">${{ "%.2f" | format(s.earned) }}</td>
+      <td class="text-right">
+        ${{ "{:,.2f}".format(s.remaining if s.remaining is defined else s.earned) }}
+        {% if s.is_partial is defined and s.is_partial %}
+        <br><span style="font-size:8pt;color:#888">(prev paid ${{ "{:,.2f}".format(s.payroll_paid) }})</span>
+        {% endif %}
+      </td>
     </tr>
     {% endfor %}
   </tbody>
@@ -118,7 +123,12 @@
       <td>{{ es.date or '—' }}</td>
       <td>{{ es.vendor or '—' }}</td>
       <td class="text-right">{{ es.split_pct }}%</td>
-      <td class="text-right">${{ "%.2f" | format(es.owed) }}</td>
+      <td class="text-right">
+        ${{ "{:,.2f}".format(es.remaining if es.remaining is defined else es.owed) }}
+        {% if es.is_partial is defined and es.is_partial %}
+        <br><span style="font-size:8pt;color:#888">(prev paid ${{ "{:,.2f}".format(es.payroll_paid) }})</span>
+        {% endif %}
+      </td>
     </tr>
     {% endfor %}
   </tbody>
@@ -129,19 +139,19 @@
   <tbody>
     <tr>
       <td>Fee Earnings:</td>
-      <td class="text-right">${{ "%.2f" | format(fee_total) }}</td>
+      <td class="text-right">${{ "{:,.2f}".format(fee_total) }}</td>
     </tr>
     <tr>
       <td>Expenses:</td>
-      <td class="text-right">${{ "%.2f" | format(exp_total) }}</td>
+      <td class="text-right">${{ "{:,.2f}".format(exp_total) }}</td>
     </tr>
     <tr>
       <td>Base Salary:</td>
-      <td class="text-right">${{ "%.2f" | format(salary) }}</td>
+      <td class="text-right">${{ "{:,.2f}".format(salary) }}</td>
     </tr>
     <tr class="total-row">
       <td>Total:</td>
-      <td class="text-right">${{ "%.2f" | format(fee_total + exp_total + salary) }}</td>
+      <td class="text-right">${{ "{:,.2f}".format(fee_total + exp_total + salary) }}</td>
     </tr>
   </tbody>
 </table>

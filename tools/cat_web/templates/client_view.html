@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Client Summary — {{ claim.insured_name or 'Claim' }}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Helvetica Neue', Arial, sans-serif;
+      font-size: 11pt;
+      color: #111;
+      background: #fff;
+      padding: 0.5in 0.6in;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    /* ── Top toolbar ── */
+    .toolbar {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 24px;
+    }
+    .btn {
+      display: inline-block;
+      padding: 7px 16px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      font-size: 10pt;
+      cursor: pointer;
+      background: #f5f5f5;
+      text-decoration: none;
+      color: #333;
+    }
+    .btn:hover { background: #e8e8e8; }
+    .btn-primary { background: #1a56db; color: #fff; border-color: #1a56db; }
+    .btn-primary:hover { background: #1545b8; }
+
+    /* ── Claim header ── */
+    .claim-header {
+      border-bottom: 2px solid #111;
+      padding-bottom: 12px;
+      margin-bottom: 28px;
+    }
+    .claim-header h1 {
+      font-size: 20pt;
+      margin-bottom: 4px;
+    }
+    .claim-header .meta {
+      font-size: 9.5pt;
+      color: #555;
+      display: flex;
+      gap: 24px;
+      flex-wrap: wrap;
+    }
+    .claim-header .meta span strong { color: #111; }
+
+    /* ── Sections ── */
+    .section {
+      margin-bottom: 36px;
+    }
+    .section h2 {
+      font-size: 13pt;
+      border-bottom: 1px solid #ccc;
+      padding-bottom: 6px;
+      margin-bottom: 14px;
+    }
+
+    /* ── Tables ── */
+    .table-scroll { overflow-x: auto; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 9.5pt;
+    }
+    th {
+      text-align: left;
+      background: #f0f0f0;
+      border-bottom: 2px solid #888;
+      padding: 6px 10px;
+      white-space: nowrap;
+    }
+    th.num, td.num { text-align: right; }
+    td {
+      padding: 5px 10px;
+      border-bottom: 1px solid #e8e8e8;
+      vertical-align: top;
+    }
+    tr:last-child td { border-bottom: none; }
+    tfoot td {
+      font-weight: bold;
+      border-top: 2px solid #888;
+      border-bottom: none;
+      background: #f8f8f8;
+    }
+    .dash { color: #bbb; }
+    a.tx-link { color: #1a56db; text-decoration: none; }
+    a.tx-link:hover { text-decoration: underline; }
+
+    /* ── Grouped check rows ── */
+    .check-header-row td {
+      background: #f0f4f8;
+      font-weight: 600;
+      border-top: 2px solid #c0ccd8;
+      border-bottom: none;
+      padding-top: 8px;
+      padding-bottom: 8px;
+    }
+    .check-header-row:first-child td { border-top: none; }
+    .detail-row td {
+      border-bottom: none;
+      padding-top: 3px;
+      padding-bottom: 3px;
+      font-size: 9pt;
+    }
+    .detail-last td { border-bottom: 1px solid #ddd; padding-bottom: 7px; }
+    .detail-label { padding-left: 26px !important; color: #333; }
+    .detail-fee .detail-label { color: #666; }
+    .detail-note { font-size: 8pt; color: #999; margin-left: 6px; font-weight: normal; }
+    tfoot .detail-row td { background: #f8f8f8; font-size: 9pt; font-weight: normal; border: none; }
+
+    /* ── Status badges ── */
+    .badge {
+      display: inline-block;
+      padding: 1px 7px;
+      border-radius: 4px;
+      font-size: 8.5pt;
+      font-weight: 600;
+    }
+    .badge-released       { background: #d1fae5; color: #065f46; }
+    .badge-pending        { background: #fef3c7; color: #92400e; }
+    .badge-fee-pending    { background: #fef3c7; color: #92400e; }
+    .badge-client-pending { background: #dbeafe; color: #1e40af; }
+    .badge-planned        { background: #f3f4f6; color: #6b7280; }
+    .badge-type           { background: #e0e7ff; color: #3730a3; }
+    .badge-paid           { background: #d1fae5; color: #065f46; }
+    .badge-partial        { background: #fef3c7; color: #92400e; }
+    .badge-unpaid         { background: #fee2e2; color: #991b1b; }
+
+    /* ── Mortgage banner ── */
+    .info-banner {
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      border-radius: 6px;
+      padding: 12px 16px;
+      font-size: 9.5pt;
+      color: #1e40af;
+      margin-bottom: 14px;
+      line-height: 1.6;
+    }
+
+    /* ── Totals cards ── */
+    .totals-row {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .totals-card {
+      flex: 1;
+      min-width: 200px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 16px 18px;
+      background: #fafafa;
+    }
+    .totals-card h3 {
+      font-size: 10.5pt;
+      margin-bottom: 12px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid #e0e0e0;
+      color: #333;
+    }
+    .totals-card .line {
+      display: flex;
+      justify-content: space-between;
+      font-size: 9.5pt;
+      padding: 3px 0;
+      color: #444;
+    }
+    .totals-card .line.indent { padding-left: 14px; color: #555; }
+    .totals-card .line.total-line {
+      font-weight: bold;
+      border-top: 1px solid #ccc;
+      margin-top: 6px;
+      padding-top: 6px;
+      color: #111;
+    }
+    .text-red { color: #dc2626; }
+    .text-green { color: #059669; }
+    .text-muted { color: #888; }
+    .highlight-amber { color: #b45309; font-weight: 600; }
+
+    /* ── Footer ── */
+    footer {
+      margin-top: 40px;
+      font-size: 8.5pt;
+      color: #888;
+      border-top: 1px solid #eee;
+      padding-top: 10px;
+    }
+
+    /* ── Print styles ── */
+    @media print {
+      body { padding: 0; max-width: none; }
+      .no-print { display: none !important; }
+      a { color: inherit !important; text-decoration: none !important; }
+      @page { margin: 0.5in; }
+      table { font-size: 8.5pt; }
+      th, td { padding: 4px 7px; }
+      .totals-row { flex-wrap: nowrap; }
+      .totals-card { page-break-inside: avoid; }
+      .section { page-break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+
+{# ── Toolbar (adjuster-only, hidden on print) ── #}
+<div class="toolbar no-print">
+  <button class="btn btn-primary" onclick="window.print()">Print / Save as PDF</button>
+  <button class="btn" onclick="window.close()">Close</button>
+</div>
+
+{# ── Claim header ── #}
+<div class="claim-header">
+  <h1>{{ claim.insured_name or 'Unnamed Client' }}</h1>
+  <div class="meta">
+    {% if claim.job_number %}<span><strong>Job #:</strong> {{ claim.job_number }}</span>{% endif %}
+    {% if claim.claim_number %}<span><strong>Claim #:</strong> {{ claim.claim_number }}</span>{% endif %}
+    {% if claim.carrier %}<span><strong>Carrier:</strong> {{ claim.carrier }}</span>{% endif %}
+    <span><strong>Generated:</strong> {{ today }}</span>
+  </div>
+</div>
+
+{# ── Section 1: Insurance Checks ── #}
+{% if insurance_checks %}
+<div class="section">
+  <h2>Checks from Insurance Company</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Check # / Recipient</th>
+        <th>Date</th>
+        <th class="num">Amount</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for ck in insurance_checks %}
+      {# Check header row #}
+      <tr class="check-header-row">
+        <td><a class="tx-link" href="/claims/{{ claim.id }}/transactions/{{ ck.id }}">{{ ck.check_number or '—' }}</a></td>
+        <td>{{ ck.date or '—' }}</td>
+        <td class="num">${{ "{:,.2f}".format(ck.amount) }}</td>
+        <td>{% if ck.status == 'Released' %}<span class="badge badge-released">Released</span>{% elif ck.status == 'Fee Pending' %}<span class="badge badge-fee-pending">Fee Pending</span>{% elif ck.status == 'Client Pending' %}<span class="badge badge-client-pending">Client Pending</span>{% elif ck.status == 'Planned' %}<span class="badge badge-planned">Planned</span>{% else %}<span class="badge badge-pending">Pending</span>{% endif %}</td>
+      </tr>
+      {# Insured distribution #}
+      {% if ck.insured_amount > 0.005 %}
+      <tr class="detail-row">
+        <td class="detail-label">→ To: {{ claim.insured_name or 'Insured' }}</td>
+        <td></td><td class="num">${{ "{:,.2f}".format(ck.insured_amount) }}</td><td></td>
+      </tr>
+      {% endif %}
+      {# Vendor distributions #}
+      {% for v in insurance_vendors %}
+      {% set amt = ck.vendor_amounts.get(v.id, 0) %}
+      {% if amt > 0.005 %}
+      <tr class="detail-row">
+        <td class="detail-label">→ To: {{ v.name }}</td>
+        <td></td><td class="num">${{ "{:,.2f}".format(amt) }}</td><td></td>
+      </tr>
+      {% endif %}
+      {% endfor %}
+      {# WP Fee — last detail row gets bottom border #}
+      {% if ck.fee_amount > 0.005 %}
+      <tr class="detail-row detail-fee detail-last">
+        <td class="detail-label">
+          → WP Fee
+          {% if ck.fee_deferred > 0.005 %}<span class="detail-note">(${{ "{:,.2f}".format(ck.fee_deferred) }} deferred)</span>{% endif %}
+          {% if ck.fee_recouped > 0.005 %}<span class="detail-note">(${{ "{:,.2f}".format(ck.fee_recouped) }} recouped)</span>{% endif %}
+        </td>
+        <td></td><td class="num">${{ "{:,.2f}".format(ck.fee_amount) }}</td><td></td>
+      </tr>
+      {% else %}
+      {# No fee — close the group on the last detail row or the header itself #}
+      <tr class="detail-last" style="height:0"><td colspan="4" style="padding:0;border-bottom:1px solid #ddd"></td></tr>
+      {% endif %}
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr>
+        <td colspan="2">Total</td>
+        <td class="num">${{ "{:,.2f}".format(insurance_checks|sum(attribute='amount')) }}</td>
+        <td></td>
+      </tr>
+      <tr class="detail-row">
+        <td class="detail-label">→ To Client</td>
+        <td></td><td class="num">${{ "{:,.2f}".format(totals.insurance_to_client) }}</td><td></td>
+      </tr>
+      <tr class="detail-row">
+        <td class="detail-label">→ To Vendors</td>
+        <td></td><td class="num">${{ "{:,.2f}".format(totals.insurance_to_vendors) }}</td><td></td>
+      </tr>
+      <tr class="detail-row">
+        <td class="detail-label">→ WP Fee</td>
+        <td></td><td class="num">${{ "{:,.2f}".format(totals.insurance_fee) }}</td><td></td>
+      </tr>
+    </tfoot>
+  </table>
+</div>
+{% endif %}
+
+{# ── Section 2: Checks Sent to Mortgage Company ── #}
+{% if mortgage_sent %}
+<div class="section">
+  <h2>Checks Sent to Mortgage Company</h2>
+  <div class="info-banner">
+    These checks are made out jointly to you and your mortgage company. They must be sent to the
+    mortgage company, which will either sign and return the check (rare) or hold the funds in escrow
+    and issue draw checks for approved repair work — typically in stages as repairs are completed.
+  </div>
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Check #</th>
+          <th>Date</th>
+          <th class="num">Amount</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for ck in mortgage_sent %}
+        <tr>
+          <td>
+            <a class="tx-link" href="/claims/{{ claim.id }}/transactions/{{ ck.id }}">{{ ck.check_number or '—' }}</a>
+          </td>
+          <td>{{ ck.date or '—' }}</td>
+          <td class="num">${{ "{:,.2f}".format(ck.amount) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td colspan="2">Total</td>
+          <td class="num">${{ "{:,.2f}".format(mortgage_sent|sum(attribute='amount')) }}</td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{# ── Section 3: Checks from Mortgage Company ── #}
+{% if mortgage_received %}
+<div class="section">
+  <h2>Checks from Mortgage Company</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Check # / Recipient</th>
+        <th>Date</th>
+        <th class="num">Amount</th>
+        <th>Type / Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for ck in mortgage_received %}
+      {# Check header row #}
+      <tr class="check-header-row">
+        <td><a class="tx-link" href="/claims/{{ claim.id }}/transactions/{{ ck.id }}">{{ ck.check_number or '—' }}</a></td>
+        <td>{{ ck.date or '—' }}</td>
+        <td class="num">${{ "{:,.2f}".format(ck.amount) }}</td>
+        <td>
+          <span class="badge badge-type">{{ ck.type }}</span>
+          {% if ck.status == 'Released' %}<span class="badge badge-released">Released</span>{% elif ck.status == 'Fee Pending' %}<span class="badge badge-fee-pending">Fee Pending</span>{% elif ck.status == 'Client Pending' %}<span class="badge badge-client-pending">Client Pending</span>{% elif ck.status == 'Planned' %}<span class="badge badge-planned">Planned</span>{% else %}<span class="badge badge-pending">Pending</span>{% endif %}
+        </td>
+      </tr>
+      {# Insured distribution #}
+      {% if ck.insured_amount > 0.005 %}
+      <tr class="detail-row">
+        <td class="detail-label">→ To: {{ claim.insured_name or 'Insured' }}</td>
+        <td></td><td class="num">${{ "{:,.2f}".format(ck.insured_amount) }}</td><td></td>
+      </tr>
+      {% endif %}
+      {# Vendor distributions #}
+      {% for v in mortgage_vendors %}
+      {% set amt = ck.vendor_amounts.get(v.id, 0) %}
+      {% if amt > 0.005 %}
+      <tr class="detail-row">
+        <td class="detail-label">→ To: {{ v.name }}</td>
+        <td></td><td class="num">${{ "{:,.2f}".format(amt) }}</td><td></td>
+      </tr>
+      {% endif %}
+      {% endfor %}
+      {# WP Fee — last detail row gets bottom border #}
+      {% if ck.fee_amount > 0.005 %}
+      <tr class="detail-row detail-fee detail-last">
+        <td class="detail-label">
+          → WP Fee
+          {% if ck.fee_deferred > 0.005 %}<span class="detail-note">(${{ "{:,.2f}".format(ck.fee_deferred) }} deferred)</span>{% endif %}
+          {% if ck.fee_recouped > 0.005 %}<span class="detail-note">(${{ "{:,.2f}".format(ck.fee_recouped) }} recouped)</span>{% endif %}
+        </td>
+        <td></td><td class="num">${{ "{:,.2f}".format(ck.fee_amount) }}</td><td></td>
+      </tr>
+      {% else %}
+      <tr class="detail-last" style="height:0"><td colspan="4" style="padding:0;border-bottom:1px solid #ddd"></td></tr>
+      {% endif %}
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr>
+        <td colspan="2">Total</td>
+        <td class="num">${{ "{:,.2f}".format(mortgage_received|sum(attribute='amount')) }}</td>
+        <td></td>
+      </tr>
+      <tr class="detail-row">
+        <td class="detail-label">→ To Client</td>
+        <td></td><td class="num">${{ "{:,.2f}".format(totals.mortgage_to_client) }}</td><td></td>
+      </tr>
+      <tr class="detail-row">
+        <td class="detail-label">→ To Vendors</td>
+        <td></td><td class="num">${{ "{:,.2f}".format(totals.mortgage_to_vendors) }}</td><td></td>
+      </tr>
+      <tr class="detail-row">
+        <td class="detail-label">→ WP Fee</td>
+        <td></td><td class="num">${{ "{:,.2f}".format(totals.mortgage_fee) }}</td><td></td>
+      </tr>
+    </tfoot>
+  </table>
+</div>
+{% endif %}
+
+{# ── Section 4: Fee Invoices ── #}
+{% if fee_invoices %}
+<div class="section">
+  <h2>Waypoint Fee Invoices</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Invoice #</th>
+        <th>Date</th>
+        <th class="num">Amount</th>
+        <th class="num">Recouped</th>
+        <th class="num">Balance</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for inv in fee_invoices %}
+      <tr>
+        <td>{{ inv.invoice_number or '—' }}</td>
+        <td>{{ inv.date or '—' }}</td>
+        <td class="num">${{ "{:,.2f}".format(inv.amount) }}</td>
+        <td class="num">${{ "{:,.2f}".format(inv.paid) }}</td>
+        <td class="num">
+          {% if inv.balance <= 0.005 %}
+            <span class="text-green">Paid ✓</span>
+          {% else %}
+            <span class="text-red">${{ "{:,.2f}".format(inv.balance) }}</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if inv.status == 'Paid' %}<span class="badge badge-released">Paid</span>
+          {% elif inv.status == 'Partial' %}<span class="badge badge-fee-pending">Partial</span>
+          {% else %}<span class="badge badge-unpaid">Unpaid</span>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr>
+        <td colspan="2">Total</td>
+        <td class="num">${{ "{:,.2f}".format(totals.fee_invoice_total) }}</td>
+        <td class="num">${{ "{:,.2f}".format(totals.fee_invoice_paid) }}</td>
+        <td class="num">
+          {% if totals.fee_invoice_balance <= 0.005 %}
+            <span class="text-green">Paid ✓</span>
+          {% else %}
+            <span class="text-red">${{ "{:,.2f}".format(totals.fee_invoice_balance) }}</span>
+          {% endif %}
+        </td>
+        <td></td>
+      </tr>
+    </tfoot>
+  </table>
+</div>
+{% endif %}
+
+{% if expenses %}
+<div class="section">
+  <h2>Client Expenses</h2>
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Payee</th>
+          <th>Reason</th>
+          <th class="num">Invoice Amt</th>
+          <th class="num">Client Owes</th>
+          <th class="num">Client Paid</th>
+          <th class="num">Balance</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for exp in expenses %}
+        <tr>
+          <td>{{ exp.invoice_date or '—' }}</td>
+          <td>
+            <a class="tx-link" href="/claims/{{ claim.id }}/expenses/{{ exp.id }}">{{ exp.payee_name or '—' }}</a>
+          </td>
+          <td>{{ exp.reason or '—' }}</td>
+          <td class="num">${{ "{:,.2f}".format(exp.invoice_amount) }}</td>
+          <td class="num">${{ "{:,.2f}".format(exp.client_amount) }}</td>
+          <td class="num">${{ "{:,.2f}".format(exp.client_paid) }}</td>
+          <td class="num">
+            {% if exp.balance <= 0.005 %}
+              <span class="text-green">Paid ✓</span>
+            {% else %}
+              <span class="text-red">${{ "{:,.2f}".format(exp.balance) }}</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td colspan="3">Total</td>
+          <td class="num">${{ "{:,.2f}".format(expenses|sum(attribute='invoice_amount')) }}</td>
+          <td class="num">${{ "{:,.2f}".format(expenses|sum(attribute='client_amount')) }}</td>
+          <td class="num">${{ "{:,.2f}".format(expenses|sum(attribute='client_paid')) }}</td>
+          <td class="num">
+            {% set bal = expenses|sum(attribute='balance') %}
+            {% if bal <= 0.005 %}
+              <span class="text-green">Paid ✓</span>
+            {% else %}
+              <span class="text-red">${{ "{:,.2f}".format(bal) }}</span>
+            {% endif %}
+          </td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{# ── Section 5: Totals Summary ── #}
+<div class="section">
+  <h2>Summary</h2>
+  <div class="totals-row">
+
+    {# Card 1: Insurance Checks (Carrier) #}
+    {% if totals.total_insurance > 0 %}
+    <div class="totals-card">
+      <h3>Insurance Checks</h3>
+      <div class="line"><span>Total from Carrier</span><span>${{ "{:,.2f}".format(totals.total_insurance) }}</span></div>
+      <div class="line indent"><span>→ To Client</span><span>${{ "{:,.2f}".format(totals.insurance_to_client) }}</span></div>
+      <div class="line indent"><span>→ To Vendors</span><span>${{ "{:,.2f}".format(totals.insurance_to_vendors) }}</span></div>
+      <div class="line indent"><span>→ WP Fee</span><span>${{ "{:,.2f}".format(totals.insurance_fee) }}</span></div>
+      {% if totals.insurance_deferred > 0.005 %}
+      <div class="line indent text-muted"><span>→ Fee Deferred</span><span>${{ "{:,.2f}".format(totals.insurance_deferred) }}</span></div>
+      {% endif %}
+      {% if totals.insurance_recouped > 0.005 %}
+      <div class="line indent text-muted"><span>→ Fee Recouped</span><span>${{ "{:,.2f}".format(totals.insurance_recouped) }}</span></div>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {# Card 2: Escrow / Mortgage #}
+    {% if totals.total_escrow_sent > 0 or totals.total_mortgage_received > 0 %}
+    <div class="totals-card">
+      <h3>Mortgage</h3>
+      {% if totals.total_escrow_sent > 0 %}
+      <div class="line"><span>Sent to Mortgage Co.</span><span>${{ "{:,.2f}".format(totals.total_escrow_sent) }}</span></div>
+      {% endif %}
+      {% if totals.total_mortgage_received > 0 %}
+      <div class="line"><span>Received Back (Draws)</span><span>${{ "{:,.2f}".format(totals.total_mortgage_received) }}</span></div>
+      <div class="line indent"><span>→ To Client</span><span>${{ "{:,.2f}".format(totals.mortgage_to_client) }}</span></div>
+      <div class="line indent"><span>→ To Vendors</span><span>${{ "{:,.2f}".format(totals.mortgage_to_vendors) }}</span></div>
+      <div class="line indent"><span>→ WP Fee</span><span>${{ "{:,.2f}".format(totals.mortgage_fee) }}</span></div>
+      {% if totals.mortgage_deferred > 0.005 %}
+      <div class="line indent text-muted"><span>→ Fee Deferred</span><span>${{ "{:,.2f}".format(totals.mortgage_deferred) }}</span></div>
+      {% endif %}
+      {% if totals.mortgage_recouped > 0.005 %}
+      <div class="line indent text-muted"><span>→ Fee Recouped</span><span>${{ "{:,.2f}".format(totals.mortgage_recouped) }}</span></div>
+      {% endif %}
+      {% endif %}
+      {% if totals.total_escrow_sent > 0 %}
+      <div class="line total-line">
+        <span>Still in Escrow</span>
+        <span {% if totals.still_in_escrow > 0.005 %}class="highlight-amber"{% endif %}>
+          ${{ "{:,.2f}".format(totals.still_in_escrow) }}
+        </span>
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {# Card 3: Fee Invoices #}
+    {% if totals.fee_invoice_total > 0 %}
+    <div class="totals-card">
+      <h3>Waypoint Fee Invoices</h3>
+      <div class="line"><span>Total Invoiced</span><span>${{ "{:,.2f}".format(totals.fee_invoice_total) }}</span></div>
+      <div class="line"><span>Recouped</span><span>${{ "{:,.2f}".format(totals.fee_invoice_paid) }}</span></div>
+      <div class="line total-line">
+        <span>Balance Due</span>
+        <span {% if totals.fee_invoice_balance > 0.005 %}class="text-red"{% else %}class="text-green"{% endif %}>
+          {% if totals.fee_invoice_balance <= 0.005 %}Paid ✓{% else %}${{ "{:,.2f}".format(totals.fee_invoice_balance) }}{% endif %}
+        </span>
+      </div>
+    </div>
+    {% endif %}
+
+    {# Card 5: Grand Total — Where It All Went #}
+    {% if totals.total_to_client > 0 or totals.total_to_vendors > 0 or totals.total_fee > 0 %}
+    <div class="totals-card">
+      <h3>All Checks Combined</h3>
+      <div class="line"><span>Total to Client</span><span>${{ "{:,.2f}".format(totals.total_to_client) }}</span></div>
+      <div class="line"><span>Total to Vendors</span><span>${{ "{:,.2f}".format(totals.total_to_vendors) }}</span></div>
+      <div class="line"><span>Total WP Fee</span><span>${{ "{:,.2f}".format(totals.total_fee) }}</span></div>
+      <div class="line total-line">
+        <span>Total Disbursed</span>
+        <span>${{ "{:,.2f}".format(totals.total_to_client + totals.total_to_vendors + totals.total_fee) }}</span>
+      </div>
+    </div>
+    {% endif %}
+
+    {# Card 6: Client Expenses #}
+    {% if totals.client_expense_owes > 0 or totals.client_expense_paid > 0 %}
+    <div class="totals-card">
+      <h3>Client Expenses</h3>
+      <div class="line"><span>Total Client Responsibility</span><span>${{ "{:,.2f}".format(totals.client_expense_owes) }}</span></div>
+      <div class="line"><span>Client Paid</span><span>${{ "{:,.2f}".format(totals.client_expense_paid) }}</span></div>
+      <div class="line total-line">
+        <span>Balance Due</span>
+        <span {% if totals.client_expense_balance > 0.005 %}class="text-red"{% else %}class="text-green"{% endif %}>
+          {% if totals.client_expense_balance <= 0.005 %}Paid ✓{% else %}${{ "{:,.2f}".format(totals.client_expense_balance) }}{% endif %}
+        </span>
+      </div>
+    </div>
+    {% endif %}
+
+  </div>
+</div>
+
+<footer>
+  Generated {{ today }} &middot; Waypoint CAT
+</footer>
+
+<script>
+  /* On print: hide links styling (they render as plain text via CSS) */
+  window.addEventListener('beforeprint', function() {
+    document.querySelectorAll('.no-print-link').forEach(function(a) {
+      var span = a.nextElementSibling;
+      if (span && span.classList.contains('print-only')) {
+        a.style.display = 'none';
+        span.style.display = 'inline';
+      }
+    });
+  });
+  window.addEventListener('afterprint', function() {
+    document.querySelectorAll('.no-print-link').forEach(function(a) {
+      var span = a.nextElementSibling;
+      if (span && span.classList.contains('print-only')) {
+        a.style.display = '';
+        span.style.display = 'none';
+      }
+    });
+  });
+</script>
+
+</body>
+</html>

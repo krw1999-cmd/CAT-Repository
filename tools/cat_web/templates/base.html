@@ -18,6 +18,7 @@
     <a href="{{ url_for('claims_list') }}" class="{% if request.endpoint == 'claims_list' %}active{% endif %}">Claims</a>
     <a href="{{ url_for('checks_queue') }}" class="{% if request.endpoint == 'checks_queue' %}active{% endif %}">Check Queue</a>
     <a href="{{ url_for('vendors_list') }}" class="{% if request.endpoint == 'vendors_list' %}active{% endif %}">Vendors</a>
+    <a href="{{ url_for('vendor_summary') }}" class="{% if request.endpoint == 'vendor_summary' %}active{% endif %}">Vendor Summary</a>
     <a href="{{ url_for('fee_recipients_list') }}" class="{% if request.endpoint == 'fee_recipients_list' %}active{% endif %}">Fee Recipients</a>
     <a href="{{ url_for('site_payroll') }}" class="{% if request.endpoint in ['site_payroll', 'site_payroll_export'] %}active{% endif %}">Payroll</a>
     <a href="{{ url_for('payroll_runs_list') }}" class="{% if request.endpoint in ['payroll_runs_list','payroll_run_new_form','payroll_run_builder'] %}active{% endif %}">Payroll Runs</a>

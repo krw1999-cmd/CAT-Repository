@@ -7,7 +7,10 @@
     <a href="{{ url_for('claims_list') }}" class="breadcrumb">← Claims</a>
     <h2>{{ claim.insured_name or 'Unnamed Claim' }}</h2>
   </div>
-  <a href="{{ url_for('claim_payroll', claim_id=claim.id) }}" class="btn btn-ghost btn-sm">Payroll →</a>
+  <div style="display:flex; gap:8px">
+    <a href="{{ url_for('claim_client_view', claim_id=claim.id) }}" class="btn btn-ghost btn-sm" target="_blank">Client View →</a>
+    <a href="{{ url_for('claim_payroll', claim_id=claim.id) }}" class="btn btn-ghost btn-sm">Payroll →</a>
+  </div>
 </div>
 
 {# ── Claim Header ────────────────────────────────────────────────────────── #}
@@ -175,6 +178,72 @@
     + Add Expense
   </button>
 </section>
+
+{# ── Vendor Activity ───────────────────────────────────────────────────────── #}
+{% if vendor_activity %}
+{% set has_fees   = vendor_activity | selectattr('fee_taken', '>', 0) | list | length > 0 %}
+{% set has_dd_va  = vendor_activity | selectattr('is_double_dip') | list | length > 0 %}
+<section class="section" id="vendor-activity-section">
+  <div class="section-header">
+    <h3>Vendor Activity</h3>
+  </div>
+  <div class="table-wrap table-scroll">
+    <table class="table table-compact">
+      <thead>
+        <tr>
+          <th>Vendor</th>
+          <th class="num">Distributed</th>
+          <th class="num">In Escrow</th>
+          <th class="num">Expense Invoice</th>
+          <th class="num">WP Paid</th>
+          <th class="num">Client Paid</th>
+          <th class="num">Outstanding</th>
+          {% if has_fees %}
+          <th class="num">Fee Owed</th>
+          <th class="num">Fee Collected</th>
+          <th class="num">Fee Deferred</th>
+          <th class="num">Fee Recouped</th>
+          {% endif %}
+          {% if has_dd_va %}<th></th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in vendor_activity %}
+        {% set in_escrow = row.from_checks - row.paid_out %}
+        <tr {% if row.is_double_dip %}class="row-warning"{% endif %}>
+          <td>
+            <a href="{{ url_for('claim_vendor_detail', claim_id=claim.id, vendor_id=row.vendor_id) }}" class="text-link">
+              {{ row.vendor_name }}
+            </a>
+          </td>
+          <td class="num">{% if row.paid_out > 0 %}{{ row.paid_out | money }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+          <td class="num text-muted">{% if in_escrow > 0.005 %}{{ in_escrow | money }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+          <td class="num">{% if row.from_expenses > 0 %}{{ row.from_expenses | money }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+          <td class="num">{% if row.wp_paid > 0 %}{{ row.wp_paid | money }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+          <td class="num">{% if row.client_paid > 0 %}{{ row.client_paid | money }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+          <td class="num {% if row.outstanding > 0.005 %}text-red{% endif %}">
+            {% if row.outstanding > 0.005 %}{{ row.outstanding | money }}{% else %}<span class="text-muted">—</span>{% endif %}
+          </td>
+          {% if has_fees %}
+          <td class="num">{% if row.fee_owed > 0 %}{{ row.fee_owed | money }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+          <td class="num">{% if row.fee_collected > 0 %}{{ row.fee_collected | money }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+          <td class="num text-muted">{% if row.fee_deferred > 0 %}{{ row.fee_deferred | money }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+          <td class="num text-muted">{% if row.fee_recouped > 0 %}{{ row.fee_recouped | money }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+          {% endif %}
+          {% if has_dd_va %}
+          <td>
+            {% if row.is_double_dip %}
+              <span class="badge-pill badge-warning" title="Same vendor on both a check and an expense — link the expense payment to the check to resolve">Double-dip</span>
+            {% endif %}
+          </td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
 
 {% endblock %}
 

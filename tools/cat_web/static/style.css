@@ -5,6 +5,7 @@
   --navy:   #1e3a5f;
   --blue:   #2563eb;
   --green:  #059669;
+  --green-tint: #f0faf4;
   --red:    #dc2626;
   --bg:     #f1f5f9;
   --card:   #ffffff;
@@ -79,6 +80,7 @@ a:hover { text-decoration: underline; }
 .flash-error   { background: #fef2f2; color: var(--red);   border: 1px solid #fecaca; }
 .flash-success { background: #f0fdf4; color: var(--green); border: 1px solid #bbf7d0; }
 .flash-warning { background: #fffbeb; color: #92400e;      border: 1px solid #fde68a; }
+.flash-info    { background: #eff6ff; color: #1e40af;      border: 1px solid #bfdbfe; }
 
 /* ── Main layout ──────────────────────────────────────────────────────────── */
 .main {
@@ -883,3 +885,11 @@ details[open] .import-check-summary::before { content: "▼"; }
 /* ===== Payroll Runs ===== */
 .row-in-run  { background: #f0fdf4; }
 .row-other-run { background: #fffbeb; }
+
+/* ===== Vendor Activity ===== */
+.badge-warning  { background: #fef3c7; color: #92400e; }
+.badge-success  { background: #d1fae5; color: #065f46; }
+.row-warning td { background: #fffbeb; }
+.row-highlight td { background: #f0f9ff; }
+.text-link { color: var(--primary); text-decoration: underline; }
+.text-link:hover { color: var(--primary-dark, #1d4ed8); }

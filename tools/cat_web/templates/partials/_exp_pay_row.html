@@ -17,6 +17,39 @@
   </td>
   <td class="text-small">{{ p.reference or '—' }}</td>
   <td class="text-small text-muted">{{ p.notes or '—' }}</td>
+  <td class="text-small" id="exp-pay-{{ p.id }}-link">
+    {% if p.linked_tx_id %}
+      <span class="badge-pill badge-success">
+        via Check {{ p.linked_tx_check_number or ('#' ~ p.linked_tx_id) }}
+      </span>
+      <button class="btn-icon btn-icon-danger"
+              hx-post="{{ url_for('exp_pay_link_tx', claim_id=claim.id, exp_id=expense.id, pid=p.id) }}"
+              hx-vals='{"tx_id": ""}'
+              hx-target="#exp-pay-{{ p.id }}"
+              hx-swap="outerHTML"
+              title="Unlink">✕</button>
+    {% elif claim_txs_for_select %}
+      <form style="display:inline"
+            hx-post="{{ url_for('exp_pay_link_tx', claim_id=claim.id, exp_id=expense.id, pid=p.id) }}"
+            hx-target="#exp-pay-{{ p.id }}"
+            hx-swap="outerHTML">
+        <select name="tx_id" class="input-sm select-sm" onchange="this.form.requestSubmit()"
+                style="width:200px">
+          <option value="">— link check —</option>
+          {% for tx in claim_txs_for_select %}
+          <option value="{{ tx.id }}">
+            {{ tx.check_number or ('#' ~ tx.id) }}
+            ({{ tx.type }})
+            {% if tx.date %} · {{ tx.date }}{% endif %}
+            · ${{ "{:,.2f}".format(tx.vendor_amount or 0) }}
+          </option>
+          {% endfor %}
+        </select>
+      </form>
+    {% else %}
+      <span class="text-muted text-small">—</span>
+    {% endif %}
+  </td>
   <td class="actions-col">
     <button class="btn-icon"
             hx-get="{{ url_for('exp_pay_edit_row', claim_id=claim.id, exp_id=expense.id, pid=p.id) }}"

@@ -204,7 +204,13 @@
           <td class="text-small">{{ s.type or '—' }}</td>
           <td class="text-right text-small">{{ s.split_pct }}%</td>
           <td class="text-right text-small">
-            {{ s.earned | money }}
+            {% if s.is_partial %}
+            <span style="text-decoration:line-through;color:#aaa;font-size:9pt">{{ s.earned | money }}</span><br>
+            <strong>{{ s.remaining | money }}</strong>
+            <span class="status-badge status-inv-pending" style="font-size:9px" title="Previously paid {{ s.payroll_paid | money }}">PARTIAL</span>
+            {% else %}
+            {{ s.remaining | money }}
+            {% endif %}
             {% if s.in_other_run %}
             <span class="status-badge status-inv-pending" title="In run: {{ s.other_run_name }}">⚠ Other run</span>
             {% endif %}
@@ -257,7 +263,13 @@
           <td class="text-small">{{ es.vendor or '—' }}</td>
           <td class="text-right text-small">{{ es.split_pct }}%</td>
           <td class="text-right text-small">
-            {{ es.owed | money }}
+            {% if es.is_partial %}
+            <span style="text-decoration:line-through;color:#aaa;font-size:9pt">{{ es.owed | money }}</span><br>
+            <strong>{{ es.remaining | money }}</strong>
+            <span class="status-badge status-inv-pending" style="font-size:9px" title="Previously paid {{ es.payroll_paid | money }}">PARTIAL</span>
+            {% else %}
+            {{ es.remaining | money }}
+            {% endif %}
             {% if es.in_other_run %}
             <span class="status-badge status-inv-pending" title="In run: {{ es.other_run_name }}">⚠ Other run</span>
             {% endif %}
@@ -270,7 +282,7 @@
   {% endif %}
 
   {% if not payee.tx_splits and not payee.exp_splits %}
-  <p class="text-muted text-small">No unpaid splits for this person.</p>
+  <p class="text-muted text-small">No outstanding splits for this person.</p>
   {% endif %}
 
   <div style="margin-top:8px">

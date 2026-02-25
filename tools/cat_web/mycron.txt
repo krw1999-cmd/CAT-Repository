@@ -1,0 +1,1 @@
+0 12 * * * /usr/bin/python3 "/Users/kirstenwittich/Documents/CAT Automation/tools/cat_web/send_reminders.py" >> "/Users/kirstenwittich/Documents/CAT Automation/tools/cat_web/reminders.log" 2>&1

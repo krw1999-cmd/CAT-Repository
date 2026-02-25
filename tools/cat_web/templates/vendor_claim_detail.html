@@ -1,0 +1,312 @@
+{% extends "base.html" %}
+{% block title %}{{ vendor.name }} — {{ claim.insured_name }}{% endblock %}
+
+{% block content %}
+
+{# ── Totals for sidebar ──────────────────────────────────────────────────── #}
+{% set check_total    = disbursements | sum(attribute='amount') %}
+{% set paid_out       = disbursements | selectattr('is_released') | sum(attribute='amount') %}
+{% set in_escrow      = check_total - paid_out %}
+{% set exp_invoice    = expenses | sum(attribute='invoice_amount') %}
+{% set exp_wp_paid    = expenses | sum(attribute='wp_paid') %}
+{% set exp_client_paid = expenses | sum(attribute='client_paid') %}
+{% set exp_outstanding = expenses | sum(attribute='outstanding') %}
+
+<div class="page-header">
+  <div>
+    <a href="{{ url_for('claim_detail', claim_id=claim.id) }}" class="breadcrumb">
+      ← {{ claim.insured_name }}
+    </a>
+    <h2>{{ vendor.name }}</h2>
+  </div>
+</div>
+
+<div class="detail-grid">
+
+  {# ── Left column ──────────────────────────────────────────────────────────── #}
+  <div class="detail-main">
+
+    {# ── Check Disbursements ───────────────────────────────────────────────── #}
+    {% set released_disb = disbursements | selectattr('is_released') | list %}
+    {% set escrow_disb   = disbursements | rejectattr('is_released') | list %}
+
+    {# Paid Out #}
+    <section class="section">
+      <div class="section-header">
+        <h3>Distributed</h3>
+        <span class="text-muted text-small">Carrier · Draw · Escrow Endorsed</span>
+      </div>
+      {% if released_disb %}
+      <div class="table-wrap">
+        <table class="table table-compact">
+          <thead>
+            <tr>
+              <th>Check #</th>
+              <th>Date</th>
+              <th>Type</th>
+              <th class="num">Amount</th>
+              <th>Notes</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for d in released_disb %}
+            <tr>
+              <td>
+                <a href="{{ url_for('tx_detail', claim_id=claim.id, tx_id=d.tx_id) }}" class="text-link">
+                  {{ d.check_number or ('#' ~ d.tx_id) }}
+                </a>
+              </td>
+              <td class="nowrap">{{ d.date or '—' }}</td>
+              <td>
+                <span class="tx-type-badge tx-type-{{ (d.type or 'other')|lower|replace(' ', '-') }}">
+                  {{ d.type or '?' }}
+                </span>
+              </td>
+              <td class="num"><strong>{{ d.amount | money }}</strong></td>
+              <td class="text-small text-muted">{{ d.notes or '—' }}</td>
+              <td>
+                <a href="{{ url_for('tx_detail', claim_id=claim.id, tx_id=d.tx_id) }}"
+                   class="btn btn-ghost btn-sm">View →</a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+          <tfoot>
+            <tr class="totals-row">
+              <td colspan="3"><strong>Total Distributed</strong></td>
+              <td class="num"><strong>{{ paid_out | money }}</strong></td>
+              <td colspan="2"></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      {% else %}
+      <p class="text-muted">No released payments to this vendor yet.</p>
+      {% endif %}
+    </section>
+
+    {# Held in Escrow #}
+    {% if escrow_disb %}
+    <section class="section">
+      <div class="section-header">
+        <h3>Held in Escrow</h3>
+      </div>
+      <div class="flash flash-info" style="margin-bottom:12px">
+        <strong>What is escrow?</strong> Your insurance carrier issued a check made out to both you and
+        the vendor. That check is currently being held by the mortgage company or a third party until
+        all parties sign off and release it. The vendor has not yet received this money — it will be
+        paid out once the escrow is cleared.
+      </div>
+      <div class="table-wrap">
+        <table class="table table-compact">
+          <thead>
+            <tr>
+              <th>Check #</th>
+              <th>Date</th>
+              <th>Type</th>
+              <th class="num">Amount</th>
+              <th>Notes</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for d in escrow_disb %}
+            <tr>
+              <td>
+                <a href="{{ url_for('tx_detail', claim_id=claim.id, tx_id=d.tx_id) }}" class="text-link">
+                  {{ d.check_number or ('#' ~ d.tx_id) }}
+                </a>
+              </td>
+              <td class="nowrap">{{ d.date or '—' }}</td>
+              <td>
+                <span class="tx-type-badge tx-type-{{ (d.type or 'other')|lower|replace(' ', '-') }}">
+                  {{ d.type or '?' }}
+                </span>
+              </td>
+              <td class="num text-muted">{{ d.amount | money }}</td>
+              <td class="text-small text-muted">{{ d.notes or '—' }}</td>
+              <td>
+                <a href="{{ url_for('tx_detail', claim_id=claim.id, tx_id=d.tx_id) }}"
+                   class="btn btn-ghost btn-sm">View →</a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+          <tfoot>
+            <tr class="totals-row">
+              <td colspan="3"><strong>Total in Escrow</strong></td>
+              <td class="num text-muted"><strong>{{ in_escrow | money }}</strong></td>
+              <td colspan="2"></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </section>
+    {% endif %}
+
+    {# ── Expenses ──────────────────────────────────────────────────────────── #}
+    <section class="section">
+      <div class="section-header">
+        <h3>Expense Invoices</h3>
+        {% if exp_invoice > 0 %}
+        <span class="text-muted text-small">
+          Invoice Total: <strong>{{ exp_invoice | money }}</strong>
+          {% if exp_outstanding > 0.005 %}
+            &nbsp;·&nbsp; Outstanding: <strong class="text-red">{{ exp_outstanding | money }}</strong>
+          {% endif %}
+        </span>
+        {% endif %}
+      </div>
+      {% if expenses %}
+        {% for exp in expenses %}
+        <div class="card" style="margin-bottom:12px">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px">
+            <div>
+              <strong>
+                <a href="{{ url_for('expense_detail', claim_id=claim.id, exp_id=exp.id) }}" class="text-link">
+                  {{ exp.payee_name or vendor.name }}
+                </a>
+              </strong>
+              {% if exp.invoice_number %}
+                <span class="text-muted text-small"> · Inv # {{ exp.invoice_number }}</span>
+              {% endif %}
+              {% if exp.invoice_date %}
+                <span class="text-muted text-small"> · {{ exp.invoice_date }}</span>
+              {% endif %}
+            </div>
+            <div style="text-align:right">
+              <div class="text-small text-muted">Invoice Amount</div>
+              <div><strong>{{ (exp.invoice_amount or 0) | money }}</strong></div>
+            </div>
+          </div>
+
+          {% if exp.payments %}
+          {# Compute via-check total for footer callout #}
+          {% set ns = namespace(via_check=0) %}
+          {% for p in exp.payments %}{% if p.linked_tx_id %}{% set ns.via_check = ns.via_check + (p.amount or 0) %}{% endif %}{% endfor %}
+          <table class="table table-compact" style="margin-bottom:4px">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Paid By</th>
+                <th class="num">Amount</th>
+                <th>Method</th>
+                <th>Reference</th>
+                <th>Paid Via</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for p in exp.payments %}
+              <tr {% if p.linked_tx_id %}style="background:var(--green-tint, #f0faf4)"{% endif %}>
+                <td class="nowrap">{{ p.date or '—' }}</td>
+                <td>
+                  {% if p.paid_by == 'wp' %}
+                    <span class="badge-pill badge-vendor">WP</span>
+                  {% else %}
+                    <span class="badge-pill badge-insured">Client</span>
+                  {% endif %}
+                </td>
+                <td class="num">{{ (p.amount or 0) | money }}</td>
+                <td class="text-small">{{ p.method or '—' }}</td>
+                <td class="text-small">{{ p.reference or '—' }}</td>
+                <td>
+                  {% if p.linked_tx_id %}
+                    <a href="{{ url_for('tx_detail', claim_id=claim.id, tx_id=p.linked_tx_id) }}"
+                       class="badge-pill badge-success" style="text-decoration:none; white-space:nowrap">
+                      ✓ Check {{ p.linked_tx_check_number or ('#' ~ p.linked_tx_id) }}
+                    </a>
+                  {% else %}
+                    <span class="text-muted text-small">Direct payment</span>
+                  {% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          {% else %}
+          {% set ns = namespace(via_check=0) %}
+          <p class="text-muted text-small" style="margin:4px 0">No payments recorded.</p>
+          {% endif %}
+
+          <div style="display:flex; gap:24px; margin-top:6px; font-size:13px; flex-wrap:wrap">
+            {% if ns.via_check > 0.005 %}
+            <span class="text-green"><strong>✓ Paid via Check: {{ ns.via_check | money }}</strong></span>
+            {% endif %}
+            {% if exp.wp_paid - ns.via_check > 0.005 %}
+            <span>WP Direct: <strong>{{ (exp.wp_paid - ns.via_check) | money }}</strong></span>
+            {% elif exp.wp_paid > 0 and ns.via_check <= 0.005 %}
+            <span>WP Paid: <strong>{{ exp.wp_paid | money }}</strong></span>
+            {% endif %}
+            {% if exp.client_paid > 0 %}
+            <span>Client Paid: <strong>{{ exp.client_paid | money }}</strong></span>
+            {% endif %}
+            {% if exp.outstanding > 0.005 %}
+            <span>Outstanding: <strong class="text-red">{{ exp.outstanding | money }}</strong></span>
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      {% else %}
+      <p class="text-muted">No expense invoices for this vendor on this claim.</p>
+      {% endif %}
+    </section>
+
+  </div>
+
+  {# ── Right sidebar ─────────────────────────────────────────────────────────── #}
+  <div class="detail-sidebar">
+    <div class="card">
+
+      {% if check_total > 0 %}
+      <div class="sidebar-label">Check Total (incl. Escrow)</div>
+      <div class="sidebar-value text-muted">{{ check_total | money }}</div>
+
+      <div class="sidebar-label">Distributed</div>
+      <div class="sidebar-value {% if paid_out > 0 %}text-green{% endif %}">{{ paid_out | money }}</div>
+
+      {% if in_escrow > 0.005 %}
+      <div class="sidebar-label">In Escrow</div>
+      <div class="sidebar-value" style="color:var(--primary)">{{ in_escrow | money }}</div>
+      {% endif %}
+      {% endif %}
+
+      {% if exp_invoice > 0 %}
+      <div class="sidebar-divider"></div>
+
+      <div class="sidebar-label">Expense Invoices</div>
+      <div class="sidebar-value">{{ exp_invoice | money }}</div>
+
+      <div class="sidebar-label">WP Paid</div>
+      <div class="sidebar-value {% if exp_wp_paid > 0 %}text-green{% endif %}">{{ exp_wp_paid | money }}</div>
+
+      <div class="sidebar-label">Client Paid</div>
+      <div class="sidebar-value {% if exp_client_paid > 0 %}text-green{% endif %}">{{ exp_client_paid | money }}</div>
+
+      {% if exp_outstanding > 0.005 %}
+      <div class="sidebar-label">Outstanding</div>
+      <div class="sidebar-value highlight">{{ exp_outstanding | money }}</div>
+      {% endif %}
+      {% endif %}
+
+      {% if vendor.phone or vendor.email or vendor.notes %}
+      <div class="sidebar-divider"></div>
+      {% if vendor.phone %}
+      <div class="sidebar-label">Phone</div>
+      <div class="sidebar-value text-small">{{ vendor.phone }}</div>
+      {% endif %}
+      {% if vendor.email %}
+      <div class="sidebar-label">Email</div>
+      <div class="sidebar-value text-small">{{ vendor.email }}</div>
+      {% endif %}
+      {% if vendor.notes %}
+      <div class="sidebar-label">Notes</div>
+      <div class="sidebar-value text-small">{{ vendor.notes }}</div>
+      {% endif %}
+      {% endif %}
+
+    </div>
+  </div>
+
+</div>
+{% endblock %}

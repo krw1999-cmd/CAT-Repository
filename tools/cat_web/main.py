@@ -131,6 +131,7 @@ def claim_detail(claim_id: int):
     summary = db_module.get_transaction_summary(claim_id)
     open_escrows = db_module.get_open_escrows(claim_id)
     coverage_pivot = db_module.get_coverage_pivot(claim_id)
+    vendor_activity = db_module.get_claim_vendor_activity(claim_id)
     return render_template(
         "claim.html",
         claim=claim,
@@ -141,6 +142,7 @@ def claim_detail(claim_id: int):
         summary=summary,
         open_escrows=open_escrows,
         coverage_pivot=coverage_pivot,
+        vendor_activity=vendor_activity,
         tx_types=TRANSACTION_TYPES,
         coverage_types=db_module.get_claim_coverage_types(claim_id),
     )
@@ -450,7 +452,7 @@ def expense_detail(claim_id: int, exp_id: int):
     wp_reimbursements  = db_module.get_wp_reimbursements(exp_id)
     splits             = db_module.get_expense_splits(exp_id)
     totals             = db_module.get_expense_totals(exp_id)
-    claim_txs          = db_module.get_claim_transactions_for_select(claim_id)
+    claim_txs          = _vendor_txs_for_expense(claim_id, expense)
     vendors            = db_module.get_all_vendors()
     return render_template(
         "expense.html",
@@ -507,6 +509,14 @@ def exp_info_save(claim_id: int, exp_id: int):
     return render_template("partials/_exp_info.html", claim=claim, expense=expense)
 
 
+def _vendor_txs_for_expense(claim_id: int, expense: dict) -> list[dict]:
+    """Return check transactions filtered to only those with a disbursement to this expense's vendor."""
+    vid = expense.get("vendor_id") if expense else None
+    if not vid:
+        return []
+    return db_module.get_claim_txs_with_vendor_disbursement(claim_id, int(vid))
+
+
 # Expense payments
 
 @app.route("/claims/<int:claim_id>/expenses/<int:exp_id>/payments/new-row")
@@ -521,18 +531,21 @@ def exp_pay_new_row(claim_id: int, exp_id: int):
 @login_required
 def exp_pay_create(claim_id: int, exp_id: int):
     data = {
-        "date":      (_clean_date(request.form.get("date")) or ""),
-        "paid_by":   request.form.get("paid_by", "wp"),
-        "amount":    db_module._f(request.form.get("amount")),
-        "method":    request.form.get("method", "").strip(),
-        "reference": request.form.get("reference", "").strip(),
-        "notes":     request.form.get("notes", "").strip(),
+        "date":         (_clean_date(request.form.get("date")) or ""),
+        "paid_by":      request.form.get("paid_by", "wp"),
+        "amount":       db_module._f(request.form.get("amount")),
+        "method":       request.form.get("method", "").strip(),
+        "reference":    request.form.get("reference", "").strip(),
+        "linked_tx_id": request.form.get("linked_tx_id") or None,
+        "notes":        request.form.get("notes", "").strip(),
     }
     pid     = db_module.create_expense_payment(exp_id, data)
     claim   = db_module.get_claim(claim_id)
     expense = db_module.get_expense(exp_id)
     p       = _row_from_list(db_module.get_expense_payments(exp_id), pid)
-    row_html    = render_template("partials/_exp_pay_row.html", claim=claim, expense=expense, p=p)
+    claim_txs = _vendor_txs_for_expense(claim_id, expense)
+    row_html    = render_template("partials/_exp_pay_row.html", claim=claim, expense=expense, p=p,
+                                  claim_txs_for_select=claim_txs)
     placeholder = '<tr id="exp-pay-new-row-placeholder"></tr>'
     resp = make_response(row_html + placeholder)
     resp.headers["HX-Trigger"] = "expTotalsUpdated"
@@ -551,28 +564,33 @@ def exp_pay_edit_row(claim_id: int, exp_id: int, pid: int):
 @app.route("/claims/<int:claim_id>/expenses/<int:exp_id>/payments/<int:pid>/view")
 @login_required
 def exp_pay_view_row(claim_id: int, exp_id: int, pid: int):
-    claim   = db_module.get_claim(claim_id)
-    expense = db_module.get_expense(exp_id)
-    p       = _row_from_list(db_module.get_expense_payments(exp_id), pid)
-    return render_template("partials/_exp_pay_row.html", claim=claim, expense=expense, p=p)
+    claim     = db_module.get_claim(claim_id)
+    expense   = db_module.get_expense(exp_id)
+    p         = _row_from_list(db_module.get_expense_payments(exp_id), pid)
+    claim_txs = _vendor_txs_for_expense(claim_id, expense)
+    return render_template("partials/_exp_pay_row.html", claim=claim, expense=expense, p=p,
+                           claim_txs_for_select=claim_txs)
 
 
 @app.route("/claims/<int:claim_id>/expenses/<int:exp_id>/payments/<int:pid>", methods=["PUT"])
 @login_required
 def exp_pay_update(claim_id: int, exp_id: int, pid: int):
     data = {
-        "date":      (_clean_date(request.form.get("date")) or ""),
-        "paid_by":   request.form.get("paid_by", "wp"),
-        "amount":    db_module._f(request.form.get("amount")),
-        "method":    request.form.get("method", "").strip(),
-        "reference": request.form.get("reference", "").strip(),
-        "notes":     request.form.get("notes", "").strip(),
+        "date":         (_clean_date(request.form.get("date")) or ""),
+        "paid_by":      request.form.get("paid_by", "wp"),
+        "amount":       db_module._f(request.form.get("amount")),
+        "method":       request.form.get("method", "").strip(),
+        "reference":    request.form.get("reference", "").strip(),
+        "linked_tx_id": request.form.get("linked_tx_id") or None,
+        "notes":        request.form.get("notes", "").strip(),
     }
     db_module.update_expense_payment(pid, data)
     claim   = db_module.get_claim(claim_id)
     expense = db_module.get_expense(exp_id)
     p       = _row_from_list(db_module.get_expense_payments(exp_id), pid)
-    row_html = render_template("partials/_exp_pay_row.html", claim=claim, expense=expense, p=p)
+    claim_txs = _vendor_txs_for_expense(claim_id, expense)
+    row_html = render_template("partials/_exp_pay_row.html", claim=claim, expense=expense, p=p,
+                               claim_txs_for_select=claim_txs)
     resp = make_response(row_html)
     resp.headers["HX-Trigger"] = "expTotalsUpdated"
     return resp
@@ -585,6 +603,20 @@ def exp_pay_delete(claim_id: int, exp_id: int, pid: int):
     resp = make_response("")
     resp.headers["HX-Trigger"] = "expTotalsUpdated"
     return resp
+
+
+@app.route("/claims/<int:claim_id>/expenses/<int:exp_id>/payments/<int:pid>/link-tx", methods=["POST"])
+@login_required
+def exp_pay_link_tx(claim_id: int, exp_id: int, pid: int):
+    raw = request.form.get("tx_id") or ""
+    tx_id = int(raw) if raw.strip() else None
+    db_module.link_expense_payment_to_tx(pid, tx_id)
+    claim     = db_module.get_claim(claim_id)
+    expense   = db_module.get_expense(exp_id)
+    p         = _row_from_list(db_module.get_expense_payments(exp_id), pid)
+    claim_txs = _vendor_txs_for_expense(claim_id, expense)
+    return render_template("partials/_exp_pay_row.html", claim=claim, expense=expense, p=p,
+                           claim_txs_for_select=claim_txs)
 
 
 # Expense reimbursements
@@ -1882,6 +1914,34 @@ def vendors_list():
     return render_template("vendors.html", vendors=vendors)
 
 
+@app.route("/vendors/summary")
+@login_required
+def vendor_summary():
+    data = db_module.get_global_vendor_activity()
+    return render_template("vendor_summary.html", **data)
+
+
+@app.route("/vendors/<int:vendor_id>/claims")
+@login_required
+def vendor_claims(vendor_id: int):
+    vendor = db_module.get_vendor(vendor_id)
+    if not vendor:
+        abort(404)
+    claims = db_module.get_vendor_claims(vendor_id)
+    return render_template("vendor_claims.html", vendor=vendor, claims=claims)
+
+
+@app.route("/claims/<int:claim_id>/vendors/<int:vendor_id>")
+@login_required
+def claim_vendor_detail(claim_id: int, vendor_id: int):
+    claim  = db_module.get_claim(claim_id)
+    vendor = db_module.get_vendor(vendor_id)
+    if not claim or not vendor:
+        abort(404)
+    detail = db_module.get_claim_vendor_detail(claim_id, vendor_id)
+    return render_template("vendor_claim_detail.html", claim=claim, vendor=vendor, **detail)
+
+
 @app.route("/vendors/options")
 @login_required
 def vendors_options():
@@ -2000,9 +2060,10 @@ def fee_recipient_create():
 @login_required
 def fee_recipient_update(rid: int):
     data = {
-        "name":         request.form.get("name", "").strip(),
-        "company_name": request.form.get("company_name", "").strip(),
-        "default_role": request.form.get("default_role", "").strip(),
+        "name":            request.form.get("name", "").strip(),
+        "company_name":    request.form.get("company_name", "").strip(),
+        "default_role":    request.form.get("default_role", "").strip(),
+        "payroll_visible": request.form.get("payroll_visible", "0"),
     }
     db_module.update_fee_recipient(rid, data)
     recipients = db_module.get_all_fee_recipients()
@@ -2465,6 +2526,17 @@ def claim_payroll_historic(claim_id: int):
     historic = db_module.get_claim_historic_assignees(claim_id)
     return render_template("partials/_payroll_historic_panel.html",
                            claim=claim, historic=historic)
+
+
+@app.route("/claims/<int:claim_id>/client-view")
+@login_required
+def claim_client_view(claim_id: int):
+    claim = db_module.get_claim(claim_id)
+    if not claim:
+        abort(404)
+    data = db_module.get_client_view_data(claim_id)
+    from datetime import date
+    return render_template("client_view.html", claim=claim, today=date.today().strftime("%B %d, %Y"), **data)
 
 
 # ---------------------------------------------------------------------------
@@ -3520,6 +3592,36 @@ def status_expense_note(exp_id: int):
     db_module.set_status_note("expense", exp_id, notes)
     return render_template("partials/_status_note.html",
                            notes=notes, save_url=url_for("status_expense_note", exp_id=exp_id))
+
+
+@app.route("/status/tx/<int:tx_id>/follow-up", methods=["POST"])
+@login_required
+def status_tx_followup(tx_id: int):
+    date_str = request.form.get("follow_up_date", "").strip()
+    db_module.set_follow_up_date("tx", tx_id, date_str)
+    return render_template("partials/_status_followup.html",
+                           follow_up_date=date_str,
+                           save_url=url_for("status_tx_followup", tx_id=tx_id))
+
+
+@app.route("/status/claim/<int:claim_id>/follow-up", methods=["POST"])
+@login_required
+def status_claim_followup(claim_id: int):
+    date_str = request.form.get("follow_up_date", "").strip()
+    db_module.set_follow_up_date("claim", claim_id, date_str)
+    return render_template("partials/_status_followup.html",
+                           follow_up_date=date_str,
+                           save_url=url_for("status_claim_followup", claim_id=claim_id))
+
+
+@app.route("/status/expense/<int:exp_id>/follow-up", methods=["POST"])
+@login_required
+def status_expense_followup(exp_id: int):
+    date_str = request.form.get("follow_up_date", "").strip()
+    db_module.set_follow_up_date("expense", exp_id, date_str)
+    return render_template("partials/_status_followup.html",
+                           follow_up_date=date_str,
+                           save_url=url_for("status_expense_followup", exp_id=exp_id))
 
 
 # ---------------------------------------------------------------------------

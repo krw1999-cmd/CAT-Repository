@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% block title %}{{ vendor.name }} — Claims{% endblock %}
+
+{% block content %}
+
+{% set total_released = claims | sum(attribute='released_amount') %}
+{% set total_escrow   = claims | sum(attribute='in_escrow') %}
+{% set total_fee      = claims | sum(attribute='fee_taken') %}
+{% set total_exp      = claims | sum(attribute='expense_invoice') %}
+{% set total_wp_paid  = claims | sum(attribute='wp_paid') %}
+{% set total_cli_paid = claims | sum(attribute='client_paid') %}
+{% set total_outst    = claims | sum(attribute='outstanding') %}
+
+<div class="page-header">
+  <div>
+    <a href="{{ url_for('vendor_summary') }}" class="breadcrumb">← Vendor Summary</a>
+    <h2>{{ vendor.name }}</h2>
+  </div>
+</div>
+
+<div class="detail-grid">
+
+  {# ── Main table ─────────────────────────────────────────────────────────── #}
+  <div class="detail-main">
+    <section class="section">
+      <div class="section-header">
+        <h3>Claims</h3>
+        <span class="text-muted text-small">{{ claims | length }} claim(s)</span>
+      </div>
+      {% if claims %}
+      <div class="table-wrap table-scroll">
+        <table class="table table-compact">
+          <thead>
+            <tr>
+              <th>Insured</th>
+              <th>Job #</th>
+              <th class="num">Distributed</th>
+              <th class="num">In Escrow</th>
+              {% if total_fee > 0 %}<th class="num">Fee Taken</th>{% endif %}
+              {% if total_exp > 0 %}
+              <th class="num">Expense Invoice</th>
+              <th class="num">WP Paid</th>
+              <th class="num">Client Paid</th>
+              <th class="num">Outstanding</th>
+              {% endif %}
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for c in claims %}
+            <tr {% if c.outstanding > 0.005 %}class="row-highlight"{% endif %}>
+              <td>
+                <a href="{{ url_for('claim_detail', claim_id=c.claim_id) }}" class="text-link">
+                  {{ c.insured_name }}
+                </a>
+              </td>
+              <td class="text-small text-muted">{{ c.job_number or '—' }}</td>
+              <td class="num">
+                {% if c.released_amount > 0 %}{{ c.released_amount | money }}{% else %}<span class="text-muted">—</span>{% endif %}
+              </td>
+              <td class="num text-muted">
+                {% if c.in_escrow > 0.005 %}{{ c.in_escrow | money }}{% else %}<span class="text-muted">—</span>{% endif %}
+              </td>
+              {% if total_fee > 0 %}
+              <td class="num">
+                {% if c.fee_taken > 0 %}{{ c.fee_taken | money }}{% else %}<span class="text-muted">—</span>{% endif %}
+              </td>
+              {% endif %}
+              {% if total_exp > 0 %}
+              <td class="num">
+                {% if c.expense_invoice > 0 %}{{ c.expense_invoice | money }}{% else %}<span class="text-muted">—</span>{% endif %}
+              </td>
+              <td class="num">
+                {% if c.wp_paid > 0 %}{{ c.wp_paid | money }}{% else %}<span class="text-muted">—</span>{% endif %}
+              </td>
+              <td class="num">
+                {% if c.client_paid > 0 %}{{ c.client_paid | money }}{% else %}<span class="text-muted">—</span>{% endif %}
+              </td>
+              <td class="num {% if c.outstanding > 0.005 %}text-red{% endif %}">
+                {% if c.outstanding > 0.005 %}{{ c.outstanding | money }}{% else %}<span class="text-muted">—</span>{% endif %}
+              </td>
+              {% endif %}
+              <td>
+                <a href="{{ url_for('claim_vendor_detail', claim_id=c.claim_id, vendor_id=vendor.id) }}"
+                   class="btn btn-ghost btn-sm">Detail →</a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+          <tfoot>
+            <tr class="totals-row">
+              <td colspan="2"><strong>Total</strong></td>
+              <td class="num"><strong>{{ total_released | money }}</strong></td>
+              <td class="num text-muted">{% if total_escrow > 0.005 %}<strong>{{ total_escrow | money }}</strong>{% else %}—{% endif %}</td>
+              {% if total_fee > 0 %}<td class="num"><strong>{{ total_fee | money }}</strong></td>{% endif %}
+              {% if total_exp > 0 %}
+              <td class="num"><strong>{{ total_exp | money }}</strong></td>
+              <td class="num"><strong>{{ total_wp_paid | money }}</strong></td>
+              <td class="num"><strong>{{ total_cli_paid | money }}</strong></td>
+              <td class="num {% if total_outst > 0.005 %}text-red{% endif %}"><strong>{{ total_outst | money }}</strong></td>
+              {% endif %}
+              <td></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      {% else %}
+      <p class="text-muted">No claims associated with this vendor.</p>
+      {% endif %}
+    </section>
+  </div>
+
+  {# ── Right sidebar ────────────────────────────────────────────────────── #}
+  <div class="detail-sidebar">
+    <div class="card">
+      <div class="sidebar-label">Claims</div>
+      <div class="sidebar-value">{{ claims | length }}</div>
+
+      {% if total_released > 0 %}
+      <div class="sidebar-divider"></div>
+      <div class="sidebar-label">Total Distributed</div>
+      <div class="sidebar-value text-green">{{ total_released | money }}</div>
+      {% if total_escrow > 0.005 %}
+      <div class="sidebar-label">In Escrow</div>
+      <div class="sidebar-value" style="color:var(--primary)">{{ total_escrow | money }}</div>
+      {% endif %}
+      {% if total_fee > 0 %}
+      <div class="sidebar-label">Fee Taken</div>
+      <div class="sidebar-value">{{ total_fee | money }}</div>
+      {% endif %}
+      {% endif %}
+
+      {% if total_exp > 0 %}
+      <div class="sidebar-divider"></div>
+      <div class="sidebar-label">Expense Invoices</div>
+      <div class="sidebar-value">{{ total_exp | money }}</div>
+      <div class="sidebar-label">WP Paid</div>
+      <div class="sidebar-value {% if total_wp_paid > 0 %}text-green{% endif %}">{{ total_wp_paid | money }}</div>
+      <div class="sidebar-label">Client Paid</div>
+      <div class="sidebar-value {% if total_cli_paid > 0 %}text-green{% endif %}">{{ total_cli_paid | money }}</div>
+      {% if total_outst > 0.005 %}
+      <div class="sidebar-label">Outstanding</div>
+      <div class="sidebar-value highlight">{{ total_outst | money }}</div>
+      {% endif %}
+      {% endif %}
+
+      {% if vendor.phone or vendor.email or vendor.notes %}
+      <div class="sidebar-divider"></div>
+      {% if vendor.phone %}
+      <div class="sidebar-label">Phone</div>
+      <div class="sidebar-value text-small">{{ vendor.phone }}</div>
+      {% endif %}
+      {% if vendor.email %}
+      <div class="sidebar-label">Email</div>
+      <div class="sidebar-value text-small">{{ vendor.email }}</div>
+      {% endif %}
+      {% if vendor.notes %}
+      <div class="sidebar-label">Notes</div>
+      <div class="sidebar-value text-small">{{ vendor.notes }}</div>
+      {% endif %}
+      {% endif %}
+    </div>
+  </div>
+
+</div>
+{% endblock %}

@@ -24,7 +24,8 @@
                value="{{ expense.payee_name or '' }}"
                placeholder="Search vendors or type name"
                autocomplete="off"
-               oninput="expInfoSyncVendorId(this.value)">
+               oninput="expInfoSyncVendorId(this.value)"
+               onchange="expInfoSyncVendorId(this.value)">
         <input type="hidden" name="vendor_id"
                id="exp-info-vendor-id"
                value="{{ expense.vendor_id or '' }}">

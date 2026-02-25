@@ -17,6 +17,7 @@
           <th>Name</th>
           <th>Company / DBA</th>
           <th>Default Role</th>
+          <th>Payroll</th>
           <th class="actions-col"></th>
         </tr>
       </thead>
@@ -48,6 +49,20 @@
               {% endfor %}
             </select>
             <span class="fr-view-{{ r.id }} capitalize text-small">{{ r.default_role or '—' }}</span>
+          </td>
+          <td>
+            <select form="fr-form-{{ r.id }}" name="payroll_visible"
+                    class="select-sm fr-edit-{{ r.id }}" style="display:none">
+              <option value="1" {% if r.payroll_visible != 0 %}selected{% endif %}>Yes</option>
+              <option value="0" {% if r.payroll_visible == 0 %}selected{% endif %}>No</option>
+            </select>
+            <span class="fr-view-{{ r.id }} text-small">
+              {% if r.payroll_visible != 0 %}
+              <span class="badge badge-paid">Yes</span>
+              {% else %}
+              <span class="text-muted">No</span>
+              {% endif %}
+            </span>
           </td>
           <td class="actions-col nowrap">
             <button class="btn-icon fr-view-{{ r.id }}"

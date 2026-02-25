@@ -1,0 +1,10 @@
+<input type="date"
+       name="follow_up_date"
+       value="{{ follow_up_date or '' }}"
+       class="input-sm followup-date-input"
+       hx-post="{{ save_url }}"
+       hx-trigger="change"
+       hx-target="closest td"
+       hx-swap="innerHTML"
+       style="width:130px"
+       title="Set follow-up date — you'll receive an email reminder on this date">

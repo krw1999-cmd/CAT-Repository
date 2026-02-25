@@ -1,0 +1,222 @@
+{% extends "base.html" %}
+{% block title %}Vendor Summary{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h2>Vendor Activity Summary</h2>
+</div>
+
+{# ── Shared macro (no fee columns) ─────────────────────────────────────────── #}
+{% macro vendor_table(vendor_list) %}
+{% set dd_ids = double_dip_claims | map(attribute='vendor_id') | list %}
+{% set has_dd = vendor_list | selectattr('id', 'in', dd_ids) | list | length > 0 %}
+<div class="table-wrap table-scroll">
+  <table class="table table-compact">
+    <thead>
+      <tr>
+        <th>Vendor</th>
+        <th class="num">Claims</th>
+        <th class="num">Distributed</th>
+        <th class="num">In Escrow</th>
+        <th class="num">Expense Invoices</th>
+        <th class="num">WP Paid</th>
+        <th class="num">Client Paid</th>
+        <th class="num">Outstanding</th>
+        {% if has_dd %}<th>Double-Dip</th>{% endif %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for v in vendor_list %}
+      {% set is_dd = v.id in dd_ids %}
+      <tr {% if is_dd %}class="row-warning"{% elif v.outstanding > 0.005 %}class="row-highlight"{% endif %}>
+        {% set in_escrow = v.check_amount - v.released_amount %}
+        <td><a href="{{ url_for('vendor_claims', vendor_id=v.id) }}" class="text-link"><strong>{{ v.name }}</strong></a></td>
+        <td class="num">{{ v.claim_count }}</td>
+        <td class="num">{% if v.released_amount > 0 %}{{ v.released_amount | money }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+        <td class="num {% if in_escrow > 0.005 %}text-muted{% endif %}">{% if in_escrow > 0.005 %}{{ in_escrow | money }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+        <td class="num">{% if v.expense_invoice > 0 %}{{ v.expense_invoice | money }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+        <td class="num">{% if v.wp_paid > 0 %}{{ v.wp_paid | money }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+        <td class="num">{% if v.client_paid > 0 %}{{ v.client_paid | money }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+        <td class="num {% if v.outstanding > 0.005 %}text-red{% endif %}">
+          {% if v.outstanding > 0.005 %}{{ v.outstanding | money }}{% else %}<span class="text-muted">—</span>{% endif %}
+        </td>
+        {% if has_dd %}
+        <td>
+          {% if is_dd %}
+            <a href="#cleanup-section" class="badge-pill badge-warning" style="text-decoration:none">Double-dip</a>
+          {% else %}
+            <span class="text-muted">—</span>
+          {% endif %}
+        </td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endmacro %}
+
+{% set client_with_fee    = vendors_client | selectattr('fee_taken', '>', 0) | list %}
+{% set client_without_fee = vendors_client | rejectattr('fee_taken', '>', 0) | list %}
+
+{# ── Client Vendors — With Fees ─────────────────────────────────────────────── #}
+<section class="section">
+  <div class="section-header">
+    <h3>Client Vendors — With Fees</h3>
+    <span class="text-muted text-small">{{ client_with_fee | length }} vendor(s)</span>
+  </div>
+  {% if client_with_fee %}
+  {% set dd_ids_fee = double_dip_claims | map(attribute='vendor_id') | list %}
+  {% set has_dd_fee = client_with_fee | selectattr('id', 'in', dd_ids_fee) | list | length > 0 %}
+  <div class="table-wrap table-scroll">
+    <table class="table table-compact">
+      <thead>
+        <tr>
+          <th>Vendor</th>
+          <th class="num">Claims</th>
+          <th class="num">Distributed</th>
+          <th class="num">In Escrow</th>
+          <th class="num">Expense Invoices</th>
+          <th class="num">WP Paid</th>
+          <th class="num">Client Paid</th>
+          <th class="num">Outstanding</th>
+          <th class="num">Fee Owed</th>
+          <th class="num">Fee Collected</th>
+          <th class="num">Fee Deferred</th>
+          <th class="num">Fee Recouped</th>
+          {% if has_dd_fee %}<th>Double-Dip</th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for v in client_with_fee %}
+        {% set is_dd = v.id in dd_ids_fee %}
+        <tr {% if is_dd %}class="row-warning"{% elif v.outstanding > 0.005 %}class="row-highlight"{% endif %}>
+          {% set in_escrow = v.check_amount - v.released_amount %}
+          <td><a href="{{ url_for('vendor_claims', vendor_id=v.id) }}" class="text-link"><strong>{{ v.name }}</strong></a></td>
+          <td class="num">{{ v.claim_count }}</td>
+          <td class="num">{% if v.released_amount > 0 %}{{ v.released_amount | money }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+          <td class="num {% if in_escrow > 0.005 %}text-muted{% endif %}">{% if in_escrow > 0.005 %}{{ in_escrow | money }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+          <td class="num">{% if v.expense_invoice > 0 %}{{ v.expense_invoice | money }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+          <td class="num">{% if v.wp_paid > 0 %}{{ v.wp_paid | money }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+          <td class="num">{% if v.client_paid > 0 %}{{ v.client_paid | money }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+          <td class="num {% if v.outstanding > 0.005 %}text-red{% endif %}">
+            {% if v.outstanding > 0.005 %}{{ v.outstanding | money }}{% else %}<span class="text-muted">—</span>{% endif %}
+          </td>
+          <td class="num">{{ v.fee_owed | money }}</td>
+          <td class="num">{% if v.fee_collected > 0 %}{{ v.fee_collected | money }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+          <td class="num text-muted">{% if v.fee_deferred > 0 %}{{ v.fee_deferred | money }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+          <td class="num text-muted">{% if v.fee_recouped > 0 %}{{ v.fee_recouped | money }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+          {% if has_dd_fee %}
+          <td>
+            {% if is_dd %}
+              <a href="#cleanup-section" class="badge-pill badge-warning" style="text-decoration:none">Double-dip</a>
+            {% else %}
+              <span class="text-muted">—</span>
+            {% endif %}
+          </td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="text-muted">No client vendors with fees recorded yet.</p>
+  {% endif %}
+</section>
+
+{# ── Client Vendors — Without Fees ──────────────────────────────────────────── #}
+{% if client_without_fee %}
+<section class="section">
+  <div class="section-header">
+    <h3>Client Vendors — Without Fees</h3>
+    <span class="text-muted text-small">{{ client_without_fee | length }} vendor(s)</span>
+  </div>
+  {{ vendor_table(client_without_fee) }}
+</section>
+{% endif %}
+
+{# ── Both (Client + WP) Vendors ─────────────────────────────────────────────── #}
+{% if vendors_both %}
+<section class="section">
+  <div class="section-header">
+    <h3>Client &amp; WP Vendors</h3>
+    <span class="text-muted text-small">{{ vendors_both | length }} vendor(s)</span>
+  </div>
+  <p class="text-muted text-small" style="margin-bottom:10px">Vendors that appear on both client-facing activity and WP internal expenses.</p>
+  {{ vendor_table(vendors_both) }}
+</section>
+{% endif %}
+
+{# ── WP Vendors ─────────────────────────────────────────────────────────────── #}
+{% if vendors_wp %}
+<section class="section">
+  <div class="section-header">
+    <h3>WP Vendors</h3>
+    <span class="text-muted text-small">{{ vendors_wp | length }} vendor(s)</span>
+  </div>
+  <p class="text-muted text-small" style="margin-bottom:10px">Vendors that only appear on WP internal expenses — no client financial stake.</p>
+  {{ vendor_table(vendors_wp) }}
+</section>
+{% endif %}
+
+{# ── Cleanup — Double-Dip Claims ────────────────────────────────────────────── #}
+{% if double_dip_claims %}
+<section class="section" id="cleanup-section">
+  <div class="section-header">
+    <h3>Cleanup — Vendor on Both Check &amp; Expense</h3>
+    <span class="badge-pill badge-warning">{{ double_dip_claims | length }} item(s)</span>
+  </div>
+  <p class="text-muted text-small" style="margin-bottom:12px">
+    These claims have the same vendor on both a check disbursement and an expense invoice.
+    Fix each one by linking the expense payment to the check transaction (on the expense detail page),
+    or by removing the duplicate entry. Once resolved, the entry will disappear from this list.
+  </p>
+  <div class="table-wrap table-scroll">
+    <table class="table table-compact">
+      <thead>
+        <tr>
+          <th>Insured</th>
+          <th>Job #</th>
+          <th>Vendor</th>
+          <th class="num">Check Amt</th>
+          <th>Check Link(s)</th>
+          <th class="num">Expense Invoice</th>
+          <th>Expense Link(s)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for dd in double_dip_claims %}
+        <tr>
+          <td>
+            <a href="{{ url_for('claim_detail', claim_id=dd.claim_id) }}" class="text-link">
+              {{ dd.insured_name }}
+            </a>
+          </td>
+          <td class="text-small">{{ dd.job_number or '—' }}</td>
+          <td>{{ dd.vendor_name }}</td>
+          <td class="num">{{ dd.check_amount | money }}</td>
+          <td class="text-small">
+            {% for tx_id in dd.tx_ids %}
+              <a href="{{ url_for('tx_detail', claim_id=dd.claim_id, tx_id=tx_id) }}" class="text-link">
+                Check Tx #{{ tx_id }}
+              </a>{% if not loop.last %}, {% endif %}
+            {% endfor %}
+          </td>
+          <td class="num">{{ dd.expense_invoice | money }}</td>
+          <td class="text-small">
+            {% for exp_id in dd.exp_ids %}
+              <a href="{{ url_for('expense_detail', claim_id=dd.claim_id, exp_id=exp_id) }}" class="text-link">
+                Expense #{{ exp_id }}
+              </a>{% if not loop.last %}, {% endif %}
+            {% endfor %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+{% endblock %}
