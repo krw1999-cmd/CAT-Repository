@@ -1,6 +1,6 @@
 """Google Drive API helpers for auto-linking PDFs to transactions/expenses."""
 from __future__ import annotations
-import pathlib, re
+import json, os, pathlib, re
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
@@ -9,14 +9,28 @@ SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 BASE   = pathlib.Path(__file__).parent
 
 def _get_service():
-    """Build an authenticated Drive service, refreshing token if needed."""
+    """Build an authenticated Drive service, refreshing token if needed.
+
+    Credential source priority:
+      1. tools/cat_web/token.json  (local dev)
+      2. GOOGLE_TOKEN_JSON env var  (Railway / production)
+    """
     token_path = BASE / "token.json"
-    if not token_path.exists():
-        return None
-    creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
-    if creds.expired and creds.refresh_token:
-        creds.refresh(Request())
-        token_path.write_text(creds.to_json())
+
+    if token_path.exists():
+        creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
+        if creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+            token_path.write_text(creds.to_json())
+    else:
+        raw = os.environ.get("GOOGLE_TOKEN_JSON", "")
+        if not raw:
+            return None
+        creds = Credentials.from_authorized_user_info(json.loads(raw), SCOPES)
+        if creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+            # Can't write back to a file in production — env var holds the token
+
     return build("drive", "v3", credentials=creds, cache_discovery=False)
 
 def _folder_id_from_url(url: str) -> str | None:
@@ -63,4 +77,4 @@ def match_invoice(files: list[dict], invoice_number: str) -> str | None:
     return None
 
 def drive_available() -> bool:
-    return (BASE / "token.json").exists()
+    return (BASE / "token.json").exists() or bool(os.environ.get("GOOGLE_TOKEN_JSON"))
