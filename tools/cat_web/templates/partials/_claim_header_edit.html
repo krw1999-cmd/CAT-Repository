@@ -68,6 +68,13 @@
                 style="width:100%; min-height:60px; resize:vertical; font-family:inherit; font-size:13px"
                 placeholder="Optional notes…">{{ claim.notes or '' }}</textarea>
     </div>
+    <div style="margin-top:8px">
+      <label class="label" for="drive_folder_url">Drive Folder URL</label>
+      <input id="drive_folder_url" type="url" name="drive_folder_url" class="input-sm"
+             style="width:100%"
+             value="{{ claim.drive_folder_url or '' }}"
+             placeholder="Paste Google Drive Financials folder link…">
+    </div>
     <div class="header-actions">
       <button type="submit" class="btn btn-primary btn-sm">Save</button>
       <button type="button" class="btn btn-ghost btn-sm"

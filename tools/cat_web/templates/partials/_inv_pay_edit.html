@@ -3,17 +3,14 @@
 {% set save_url = url_for('payment_create', claim_id=claim.id, tx_id=tx.id) if is_new else url_for('payment_update', claim_id=claim.id, tx_id=tx.id, pid=p.id) %}
 {% set save_method = "post" if is_new else "put" %}
 {% set form_id = "inv-pay-form-" ~ row_id %}
-{% set sel_id = "inv-pay-method-sel-" ~ row_id %}
-{% set linked_cell_id = "inv-pay-linked-tx-cell-" ~ row_id %}
 
 <tr id="{{ row_id }}">
   <td>
     <input type="date" min="2000-01-01" max="2099-12-31" name="date" class="input-sm" form="{{ form_id }}"
-           value="{{ p.date if p else '' }}">
+           value="{{ p.date if p else '' }}" style="width:130px">
   </td>
   <td>
-    <select name="method" class="input-sm select-sm" form="{{ form_id }}"
-            id="{{ sel_id }}" onchange="invPayMethodChange_{{ row_id|replace('-','_') }}(this)">
+    <select name="method" class="input-sm select-sm" form="{{ form_id }}" style="width:90px">
       <option value="qb"    {% if p and p.method == 'qb'    %}selected{% endif %}>QB</option>
       <option value="check" {% if p and p.method == 'check' %}selected{% endif %}>Check</option>
       <option value="recoup"{% if p and p.method == 'recoup'%}selected{% endif %}>Recoup</option>
@@ -26,17 +23,6 @@
   <td>
     <input type="text" name="reference" class="input-sm" form="{{ form_id }}"
            value="{{ p.reference if p else '' }}" placeholder="Ref #" style="width:100px">
-  </td>
-  <td id="{{ linked_cell_id }}" {% if not p or p.method != 'recoup' %}style="display:none"{% endif %}>
-    <select name="linked_tx_id" class="input-sm select-sm" form="{{ form_id }}">
-      <option value="">— select check —</option>
-      {% for t in claim_txs_for_select %}
-      <option value="{{ t.id }}"
-              {% if p and p.linked_tx_id == t.id %}selected{% endif %}>
-        #{{ t.sequence_number }} {{ t.type }} {{ t.date or '' }}
-      </option>
-      {% endfor %}
-    </select>
   </td>
   <td class="actions-col">
     <button class="btn btn-primary btn-sm" form="{{ form_id }}" type="submit">Save</button>
@@ -66,10 +52,5 @@
   f.style.display = 'none';
   document.body.appendChild(f);
   htmx.process(f);
-
-  window['invPayMethodChange_{{ row_id|replace("-","_") }}'] = function(sel) {
-    const cell = document.getElementById('{{ linked_cell_id }}');
-    if (cell) cell.style.display = sel.value === 'recoup' ? '' : 'none';
-  };
 })();
 </script>

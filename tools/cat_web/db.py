@@ -381,6 +381,9 @@ _MIGRATIONS = [
     ("expenses",           "follow_up_date",          "TEXT"),
     ("fee_recipients",     "payroll_visible",         "INTEGER NOT NULL DEFAULT 1"),
     ("expense_payments",   "linked_tx_id",            "INTEGER REFERENCES transactions(id)"),
+    ("claims",             "drive_folder_url",        "TEXT"),
+    ("transactions",       "drive_file_url",          "TEXT"),
+    ("expenses",           "drive_file_url",          "TEXT"),
 ]
 
 _STATUS_NOTES_DDL = """
@@ -601,6 +604,7 @@ def update_claim(claim_id: int, data: dict) -> None:
                              proc_method_carrier=:proc_method_carrier,
                              proc_method_draw=:proc_method_draw,
                              proc_method_escrow=:proc_method_escrow,
+                             drive_folder_url=:drive_folder_url,
                              updated_at=:now
            WHERE id = :id""",
         {
@@ -609,6 +613,7 @@ def update_claim(claim_id: int, data: dict) -> None:
             "proc_method_carrier": data.get("proc_method_carrier") or None,
             "proc_method_draw":    data.get("proc_method_draw") or None,
             "proc_method_escrow":  data.get("proc_method_escrow") or None,
+            "drive_folder_url":    data.get("drive_folder_url") or None,
             "now": _now(),
             "id": claim_id,
         },
@@ -1923,6 +1928,23 @@ def update_expense(exp_id: int, data: dict) -> None:
 def delete_expense(exp_id: int) -> None:
     get_db().execute("DELETE FROM expenses WHERE id = ?", (exp_id,))
     get_db().commit()
+
+
+def sync_drive_links(claim_id: int, tx_links: dict, exp_links: dict) -> None:
+    """Bulk-update drive_file_url for transactions and expenses where a match was found.
+    Only sets null/empty fields — does not overwrite existing values."""
+    db = get_db()
+    for tx_id, url in tx_links.items():
+        db.execute(
+            "UPDATE transactions SET drive_file_url=? WHERE id=? AND (drive_file_url IS NULL OR drive_file_url='')",
+            (url, tx_id),
+        )
+    for exp_id, url in exp_links.items():
+        db.execute(
+            "UPDATE expenses SET drive_file_url=? WHERE id=? AND (drive_file_url IS NULL OR drive_file_url='')",
+            (url, exp_id),
+        )
+    db.commit()
 
 
 # ---------------------------------------------------------------------------

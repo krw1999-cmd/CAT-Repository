@@ -108,6 +108,11 @@
     {% endif %}
   </div>
   <div class="header-actions">
+    {% if tx.drive_file_url %}
+      <a href="{{ tx.drive_file_url }}" target="_blank" class="btn btn-ghost btn-sm">&#128196; View Check PDF</a>
+    {% elif claim.drive_folder_url %}
+      <a href="{{ claim.drive_folder_url }}" target="_blank" class="btn btn-ghost btn-sm">&#128193; Financials Folder</a>
+    {% endif %}
     <button class="btn btn-ghost btn-sm"
             hx-get="{{ url_for('tx_info_edit', claim_id=claim.id, tx_id=tx.id) }}"
             hx-target="#tx-info"

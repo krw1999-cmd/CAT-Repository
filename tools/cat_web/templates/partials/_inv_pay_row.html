@@ -12,8 +12,7 @@
     {% endif %}
   </td>
   <td class="num">{{ (p.amount or 0) | money }}</td>
-  <td class="text-small">{{ p.reference if p.reference else '—' }}</td>
-  <td class="text-small text-muted">{% if p.linked_tx_id and p.linked_tx_seq %}#{{ p.linked_tx_seq }}{% else %}—{% endif %}</td>
+  <td class="text-small" style="text-align:center">{{ p.reference if p.reference else '—' }}</td>
   <td class="actions-col">
     <button class="btn-icon"
             hx-get="{{ url_for('payment_edit_row', claim_id=claim.id, tx_id=tx.id, pid=p.id) }}"

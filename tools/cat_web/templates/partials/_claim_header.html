@@ -50,6 +50,15 @@
   <div style="margin-top:8px; padding-top:8px; border-top:1px solid var(--border); font-size:13px; color:var(--text-muted); white-space:pre-wrap">{{ claim.notes }}</div>
   {% endif %}
   <div class="header-actions">
+    {% if claim.drive_folder_url %}
+    <a href="{{ claim.drive_folder_url }}" target="_blank" class="btn btn-ghost btn-sm">&#128193; Drive Folder</a>
+    <button class="btn btn-ghost btn-sm"
+            hx-post="{{ url_for('claim_sync_drive', claim_id=claim.id) }}"
+            hx-swap="none"
+            hx-on::after-request="this.textContent = event.detail.successful ? '&#10003; Synced' : '&#10007; Failed'">
+      &#128260; Sync Drive Files
+    </button>
+    {% endif %}
     <button class="btn btn-ghost btn-sm"
             hx-get="{{ url_for('claim_header_edit', claim_id=claim.id) }}"
             hx-target="#claim-header"

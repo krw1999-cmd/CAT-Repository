@@ -28,6 +28,7 @@ from flask_login import login_required, login_user, logout_user, current_user
 import auth
 import config
 import db as db_module
+import drive_sync
 
 app = Flask(__name__)
 app.secret_key = config.SECRET_KEY
@@ -185,10 +186,46 @@ def claim_header_save(claim_id: int):
         "proc_method_carrier": request.form.get("proc_method_carrier") or None,
         "proc_method_draw":    request.form.get("proc_method_draw") or None,
         "proc_method_escrow":  request.form.get("proc_method_escrow") or None,
+        "drive_folder_url":    request.form.get("drive_folder_url", "").strip() or None,
     }
     db_module.update_claim(claim_id, data)
     claim = db_module.get_claim(claim_id)
     return render_template("partials/_claim_header.html", claim=claim)
+
+
+@app.route("/claims/<int:claim_id>/sync-drive", methods=["POST"])
+@login_required
+def claim_sync_drive(claim_id: int):
+    claim = db_module.get_claim(claim_id)
+    if not claim or not claim.get("drive_folder_url"):
+        return ("No folder URL set", 400)
+
+    files = drive_sync.list_folder_files(claim["drive_folder_url"])
+
+    txs  = db_module.get_transactions(claim_id)
+    exps = db_module.get_expenses(claim_id)
+
+    tx_links  = {}
+    exp_links = {}
+    matched = 0
+
+    for tx in txs:
+        if (tx.get("type") or "").lower() == "fee invoice":
+            url = drive_sync.match_invoice(files, tx.get("invoice_number") or "")
+        else:
+            url = drive_sync.match_check(files, tx.get("check_number") or "")
+        if url:
+            tx_links[tx["id"]] = url
+            matched += 1
+
+    for exp in exps:
+        url = drive_sync.match_invoice(files, exp.get("invoice_number") or "")
+        if url:
+            exp_links[exp["id"]] = url
+            matched += 1
+
+    db_module.sync_drive_links(claim_id, tx_links, exp_links)
+    return f"Synced {matched} file(s)", 200
 
 
 # ---------------------------------------------------------------------------

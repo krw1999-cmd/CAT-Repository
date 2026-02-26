@@ -14,3 +14,7 @@ __pycache__/
 
 # Import temp files
 tools/cat_web/tmp/
+
+# Google Drive API credentials (never commit)
+tools/cat_web/credentials.json
+tools/cat_web/token.json

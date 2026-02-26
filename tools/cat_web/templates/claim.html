@@ -13,6 +13,14 @@
   </div>
 </div>
 
+{# ── Auto-sync Drive files on page load ──────────────────────────────────── #}
+{% if claim.drive_folder_url %}
+<span hx-post="{{ url_for('claim_sync_drive', claim_id=claim.id) }}"
+      hx-trigger="load"
+      hx-swap="none"
+      style="display:none"></span>
+{% endif %}
+
 {# ── Claim Header ────────────────────────────────────────────────────────── #}
 <div id="claim-header">
   {% include "partials/_claim_header.html" %}

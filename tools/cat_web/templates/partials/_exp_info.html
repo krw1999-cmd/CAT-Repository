@@ -68,6 +68,11 @@
     </div>
   </div>
   <div class="header-actions">
+    {% if expense.drive_file_url %}
+      <a href="{{ expense.drive_file_url }}" target="_blank" class="btn btn-ghost btn-sm">&#128196; View Invoice PDF</a>
+    {% elif claim.drive_folder_url %}
+      <a href="{{ claim.drive_folder_url }}" target="_blank" class="btn btn-ghost btn-sm">&#128193; Financials Folder</a>
+    {% endif %}
     <button class="btn btn-ghost btn-sm"
             hx-get="{{ url_for('exp_info_edit', claim_id=claim.id, exp_id=expense.id) }}"
             hx-target="#exp-info"
