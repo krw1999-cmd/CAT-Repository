@@ -528,8 +528,19 @@ def get_all_claims() -> list[dict]:
     sql = """
         SELECT c.*,
                COALESCE(fc.fee_collected_sum, 0) AS total_collected_sum,
-               COALESCE(uinv.unpaid_invoice_count, 0) AS unpaid_invoice_count
+               COALESCE(uinv.unpaid_invoice_count, 0) AS unpaid_invoice_count,
+               COALESCE(adj.awaiting_adjuster_count, 0) AS awaiting_adjuster_count
         FROM claims c
+        LEFT JOIN (
+            SELECT t3.claim_id, COUNT(*) AS awaiting_adjuster_count
+            FROM transactions t3
+            WHERE LOWER(TRIM(t3.type)) IN ('carrier', 'draw', 'escrow endorsed')
+              AND (t3.void IS NULL OR t3.void = 0)
+              AND NOT EXISTS (
+                  SELECT 1 FROM disbursements d3 WHERE d3.transaction_id = t3.id
+              )
+            GROUP BY t3.claim_id
+        ) adj ON adj.claim_id = c.id
         LEFT JOIN (
             SELECT t.claim_id,
                    SUM(
@@ -2546,6 +2557,10 @@ def get_client_view_data(claim_id: int) -> dict:
         )
         return [{"id": r["id"], "name": r["name"]} for r in rows]
 
+    insurance_checks.sort(key=lambda x: x.get("date") or "")
+    mortgage_sent.sort(key=lambda x: x.get("date") or "")
+    mortgage_received.sort(key=lambda x: x.get("date") or "")
+
     insurance_vendors = _vendors_for(insurance_checks)
     mortgage_vendors  = _vendors_for(mortgage_received)
 
@@ -3827,6 +3842,8 @@ def get_global_status() -> dict:
                t.check_number, t.amount, t.follow_up_date,
                c.id AS claim_id, c.insured_name, c.job_number, c.claim_number,
                (SELECT COUNT(*) FROM disbursements d
+                WHERE d.transaction_id = t.id) AS disbursement_count,
+               (SELECT COUNT(*) FROM disbursements d
                 WHERE d.transaction_id = t.id
                   AND d.client_received = 0
                   AND d.amount > 0.005) AS pending_client_count,
@@ -3846,7 +3863,11 @@ def get_global_status() -> dict:
         WHERE (t.void IS NULL OR t.void = 0)
           AND LOWER(TRIM(t.type)) IN ('carrier', 'draw', 'escrow endorsed')
           AND (
-            EXISTS (
+            NOT EXISTS (
+                SELECT 1 FROM disbursements d
+                WHERE d.transaction_id = t.id
+            )
+            OR EXISTS (
                 SELECT 1 FROM disbursements d
                 WHERE d.transaction_id = t.id
                   AND d.fee_applies = 1
@@ -3870,7 +3891,7 @@ def get_global_status() -> dict:
                    c.follow_up_date,
                    COALESCE(SUM(CASE WHEN LOWER(TRIM(t.type))='escrow'
                                      THEN t.amount ELSE 0 END), 0) AS total_escrowed,
-                   COALESCE(SUM(CASE WHEN LOWER(TRIM(t.type)) IN ('draw','escrow endorsed')
+                   COALESCE(SUM(CASE WHEN LOWER(TRIM(t.type))='draw'
                                      THEN t.amount ELSE 0 END), 0) AS total_drawn
             FROM claims c
             LEFT JOIN transactions t ON t.claim_id = c.id

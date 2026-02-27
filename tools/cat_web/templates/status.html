@@ -55,7 +55,9 @@
         <td>{{ ck.check_date or '—' }}</td>
         <td class="num-col">{{ ck.amount | money }}</td>
         <td>
-          {% if not ck.fee_applicable_count %}
+          {% if not ck.disbursement_count %}
+            <span class="badge badge-warning">Awaiting adjuster</span>
+          {% elif not ck.fee_applicable_count %}
             <span class="text-muted">—</span>
           {% elif ck.fee_not_received_count and ck.fee_not_received_count > 0 %}
             <span class="badge badge-unpaid-inv">Pending</span>
@@ -64,7 +66,9 @@
           {% endif %}
         </td>
         <td>
-          {% if ck.pending_client_count and ck.pending_client_count > 0 %}
+          {% if not ck.disbursement_count %}
+            <span class="text-muted">—</span>
+          {% elif ck.pending_client_count and ck.pending_client_count > 0 %}
             <span class="badge badge-unpaid-inv">{{ ck.pending_client_count }} pending</span>
           {% else %}
             <span class="badge badge-paid">✓</span>
@@ -342,7 +346,7 @@
           {% include "partials/_status_followup.html" %}
         </td>
         <td>
-          <a href="{{ url_for('claim_detail', claim_id=row.claim_id) }}"
+          <a href="{{ url_for('tx_detail', claim_id=row.claim_id, tx_id=row.tx_id) }}"
              class="btn btn-ghost btn-sm">View →</a>
         </td>
       </tr>
@@ -411,7 +415,7 @@
           {% include "partials/_status_followup.html" %}
         </td>
         <td>
-          <a href="{{ url_for('claim_detail', claim_id=exp.claim_id) }}"
+          <a href="{{ url_for('expense_detail', claim_id=exp.claim_id, exp_id=exp.exp_id) }}"
              class="btn btn-ghost btn-sm">View →</a>
         </td>
       </tr>

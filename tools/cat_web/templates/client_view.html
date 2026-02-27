@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Client Summary — {{ claim.insured_name or 'Claim' }}</title>
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -211,6 +212,8 @@
       .totals-row { flex-wrap: nowrap; }
       .totals-card { page-break-inside: avoid; }
       .section { page-break-inside: avoid; }
+      .detail-note { color: #333 !important; }
+      .text-muted { color: #444 !important; }
     }
   </style>
 </head>
